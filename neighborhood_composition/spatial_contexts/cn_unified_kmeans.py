@@ -12,7 +12,6 @@ Key Features:
 - Generates individual spatial CN maps for EACH tile
 - Saves processed h5ad files with CN annotations for spatial context analysis
 
-Author: Generated with Claude Code
 Date: 2025-10-27
 """
 
@@ -571,7 +570,8 @@ class UnifiedCellularNeighborhoodDetector:
         group_by_tile: bool = False,
         figsize: Tuple[int, int] = (12, 6),
         save_path: Optional[str] = None,
-        color_palette: str = 'Set2'
+        color_palette: str = 'Set2',
+        show_tile_names: bool = False
     ):
         """
         Generate a graph showing neighborhood frequency.
@@ -588,6 +588,8 @@ class UnifiedCellularNeighborhoodDetector:
             Path to save figure
         color_palette : str
             Color palette name for the plot (default: 'Set2' to match individual tile maps)
+        show_tile_names : bool, default=False
+            Whether to display tile names on x-axis when group_by_tile=True (default: False to hide names)
         """
         print(f"\nGenerating neighborhood frequency graph...")
         
@@ -625,7 +627,11 @@ class UnifiedCellularNeighborhoodDetector:
                         fontsize=14, fontweight='bold', pad=15)
             ax.legend(title='Cellular Neighborhood', bbox_to_anchor=(1.05, 1), 
                      loc='upper left', fontsize=9)
-            ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+            if show_tile_names:
+                ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+            else:
+                # Hide tile names by default
+                ax.set_xticklabels([])
             ax.grid(axis='y', alpha=0.3, linestyle='--')
             
             plt.tight_layout()
@@ -878,7 +884,7 @@ def main():
     )
     parser.add_argument(
         '--tiles_dir', '-t',
-        default='/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/Batch_105/pred/h5ad',
+        default='/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred/h5ad/bg',
         # adjacent_tissue, center, margin
         # /mnt/c/ProgramData/github_repo/image_analysis_scripts/neighborhood_composition/spatial_contexts/selected_h5ad_tiles/processed_h5ad
         # /mnt/c/ProgramData/github_repo/image_analysis_scripts/neighborhood_composition/spatial_contexts/selected_h5ad_tiles
@@ -895,7 +901,7 @@ def main():
         help='Number of nearest neighbors (default: 20)'
     )
     parser.add_argument(
-        '--n_clusters', '-n', type=int, default=8,  # default=7
+        '--n_clusters', '-n', type=int, default=5,  # default=7
         help='Number of cellular neighborhoods (default: 7)'
     )
     parser.add_argument(

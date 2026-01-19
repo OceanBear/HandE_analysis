@@ -22,6 +22,9 @@ from typing import List, Dict, Optional
 import warnings
 warnings.filterwarnings('ignore')
 
+# Get the directory where this script is located
+SCRIPT_DIR = Path(__file__).parent.resolve()
+
 
 class GroupCNAnalyzer:
     """Analyzes cellular neighborhoods by predefined groups."""
@@ -35,13 +38,24 @@ class GroupCNAnalyzer:
         processed_h5ad_dir : str
             Directory containing processed h5ad files with CN annotations
         categories_json : str
-            Path to JSON file with tile categorization
+            Path to JSON file with tile categorization (relative paths resolved from script directory)
         output_dir : str
-            Output directory for group-specific results
+            Output directory for group-specific results (relative paths resolved from script directory)
         """
         self.processed_h5ad_dir = Path(processed_h5ad_dir)
-        self.categories_json = Path(categories_json)
-        base_output_dir = Path(output_dir)
+        
+        # Resolve relative paths relative to script directory
+        categories_json_path = Path(categories_json)
+        if not categories_json_path.is_absolute():
+            self.categories_json = (SCRIPT_DIR / categories_json_path).resolve()
+        else:
+            self.categories_json = categories_json_path
+        
+        output_dir_path = Path(output_dir)
+        if not output_dir_path.is_absolute():
+            base_output_dir = (SCRIPT_DIR / output_dir_path).resolve()
+        else:
+            base_output_dir = output_dir_path
         
         # Load categorization
         with open(self.categories_json, 'r') as f:
@@ -50,7 +64,7 @@ class GroupCNAnalyzer:
         # Extract tile size from metadata and create subfolder
         tile_size_mm = self.categories.get('metadata', {}).get('tile_size_mm2', 2.0)
         # Convert to string like "2mm" (assuming integer tile sizes)
-        tile_size_folder = f"{int(tile_size_mm)}mm"
+        tile_size_folder = f"{int(tile_size_mm)}mm_groups"
         
         # Create output directory with tile size subfolder
         self.output_dir = base_output_dir / tile_size_folder
@@ -380,7 +394,8 @@ class GroupCNAnalyzer:
         cn_key: str = 'cn_celltype',
         figsize=(14, 8),
         save_path: Optional[str] = None,
-        color_palette: str = 'Set2'
+        color_palette: str = 'Set2',
+        show_tile_names: bool = False
     ):
         """
         Visualize per-tile frequency with highlighted group tiles.
@@ -391,6 +406,8 @@ class GroupCNAnalyzer:
             Directory containing ALL processed h5ad files
         group_name : str
             Group name to highlight
+        show_tile_names : bool, default=False
+            Whether to display tile names on x-axis (default: False to hide names)
         """
         print(f"\nGenerating per-tile frequency with {group_name} highlighted...")
         
@@ -504,18 +521,24 @@ class GroupCNAnalyzer:
         
         ax.grid(axis='y', alpha=0.3, linestyle='--')
         
-        # Highlight group tiles with bold and red color
-        x_labels = ax.get_xticklabels()
+        # Handle tile name display
+        if show_tile_names:
+            # Highlight group tiles with bold and red color
+            x_labels = ax.get_xticklabels()
+            
+            for label in x_labels:
+                tile_name = label.get_text()
+                if tile_name in group_tiles:
+                    # Highlight with bold and different color
+                    label.set_weight('bold')
+                    label.set_color('red')
+                    label.set_fontsize(10)
+            
+            ax.set_xticklabels(x_labels, rotation=45, ha='right')
+        else:
+            # Hide tile names by default
+            ax.set_xticklabels([])
         
-        for label in x_labels:
-            tile_name = label.get_text()
-            if tile_name in group_tiles:
-                # Highlight with bold and different color
-                label.set_weight('bold')
-                label.set_color('red')
-                label.set_fontsize(10)
-        
-        ax.set_xticklabels(x_labels, rotation=45, ha='right')
         plt.tight_layout()
         
         if save_path:
@@ -634,18 +657,18 @@ def main():
     )
     parser.add_argument(
         '--processed_h5ad_dir',
-        default='/mnt/c/ProgramData/github_repo/image_analysis_scripts/neighborhood_composition/spatial_contexts/cn_unified_results/2mm_all_105_clusters=5/processed_h5ad',
+        default='/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/cn_unified_results/all_n_cluster=7/processed_h5ad',
         help='Directory containing processed h5ad files with CN annotations'
     )
     parser.add_argument(
         '--categories_json',
-        default='/mnt/c/ProgramData/github_repo/image_analysis_scripts/neighborhood_composition/spatial_contexts/cn_unified_results/2mm_all_105_clusters=5/tile_categories.json',
-        help='Path to tile categories JSON file'
+        default='tile_categories_88_tiles.json',
+        help='Path to tile categories JSON file (relative to script directory)'
     )
     parser.add_argument(
         '--output_dir',
-        default='/mnt/c/ProgramData/github_repo/image_analysis_scripts/neighborhood_composition/spatial_contexts/cn_unified_results_selected',
-        help='Output directory for group-specific results'
+        default='cn_unified_results_groups',
+        help='Output directory for group-specific results (relative to script directory)'
     )
     parser.add_argument(
         '--cn_key',

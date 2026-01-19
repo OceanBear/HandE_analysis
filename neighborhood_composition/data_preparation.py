@@ -325,8 +325,8 @@ if __name__ == "__main__":
     # ========================================================================
     elif MODE == 'batch':
         # Option A: Process all JSON files in a directory
-        json_dir = '/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/Batch_105/pred/json'    # /mnt/g/GDC-TCGA-LUAD/00a0b174-1eab-446a-ba8c-7c6e3acd7f0c/pred/json
-        output_dir = '/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/Batch_105/pred/h5ad'  # /mnt/g/GDC-TCGA-LUAD/00a0b174-1eab-446a-ba8c-7c6e3acd7f0c/pred/h5ad
+        json_dir = '/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred/json'    # /mnt/g/GDC-TCGA-LUAD/00a0b174-1eab-446a-ba8c-7c6e3acd7f0c/pred/json
+        output_dir = '/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred/h5ad'  # /mnt/g/GDC-TCGA-LUAD/00a0b174-1eab-446a-ba8c-7c6e3acd7f0c/pred/h5ad
 
         results = batch_process_json_files(
             json_dir=json_dir,
