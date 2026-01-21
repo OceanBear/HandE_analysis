@@ -228,7 +228,7 @@ class SpatialContextDetector:
 
     def build_knn_graph(
         self,
-        k: int = 40,
+        k: int = 20,
         coord_key: str = 'spatial',
         key_added: str = 'spatial_connectivities_sc'
     ):
@@ -1069,7 +1069,7 @@ class SpatialContextDetector:
 
     def run_full_pipeline(
         self,
-        k: int = 40,
+        k: int = 20,
         threshold: float = 0.9,
         min_fraction: float = 0.05,
         min_cells: int = 100,

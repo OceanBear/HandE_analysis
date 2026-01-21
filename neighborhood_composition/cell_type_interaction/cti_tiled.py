@@ -602,8 +602,17 @@ def aggregate_from_saved_results(tile_dirs, output_dir, tile_names=None, n_perms
     if len(zscores_list) == 0:
         raise ValueError("No valid results found to aggregate!")
 
-    # Create common cell type order (sorted for consistency)
-    common_cell_types = sorted(list(all_cell_types_set))
+    # Create common cell type order: preserve order from first tile, append missing types
+    # This maintains the same order as single-tile results (from h5ad categorical order)
+    first_tile_cell_types = metadata_list[0]['cell_types']
+    common_cell_types = list(first_tile_cell_types)  # Start with first tile's order
+    
+    # Append any cell types from other tiles that aren't in the first tile
+    for metadata in metadata_list[1:]:
+        for ct in metadata['cell_types']:
+            if ct not in common_cell_types:
+                common_cell_types.append(ct)
+    
     n_common_types = len(common_cell_types)
     
     print(f"\nAligning z-score matrices to common cell type set...")
