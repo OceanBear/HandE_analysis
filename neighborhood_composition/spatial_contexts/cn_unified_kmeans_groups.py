@@ -331,7 +331,7 @@ class GroupCNAnalyzer:
         group_name: str,
         figsize=(10, 6),
         save_path: Optional[str] = None,
-        color_palette: str = 'Set2'
+        color_palette: str = 'tab20'
     ):
         """Visualize neighborhood frequency for a group."""
         plt.close('all')
@@ -394,7 +394,7 @@ class GroupCNAnalyzer:
         cn_key: str = 'cn_celltype',
         figsize=(14, 8),
         save_path: Optional[str] = None,
-        color_palette: str = 'Set2',
+        color_palette: str = 'tab20',
         show_tile_names: bool = False
     ):
         """
@@ -547,12 +547,114 @@ class GroupCNAnalyzer:
         
         plt.close(fig)
     
+    def visualize_all_groups_per_tile_frequency(
+        self,
+        cn_key: str = 'cn_celltype',
+        figsize=(16, 8),
+        save_path: Optional[str] = None,
+        color_palette: str = 'tab20'
+    ):
+        """
+        Visualize per-tile frequency for all groups in one figure, with bars clustered by group.
+        
+        Parameters:
+        -----------
+        cn_key : str
+            Key in adata.obs containing CN labels
+        figsize : tuple
+            Figure size
+        save_path : str, optional
+            Path to save figure
+        color_palette : str
+            Color palette name
+        """
+        print(f"\nGenerating combined per-tile frequency for all groups...")
+        
+        # Get all groups and create tile-to-group mapping
+        groups = [key for key in self.categories.keys() if key != 'metadata']
+        tile_to_group = {tile: group for group in groups for tile in self.categories[group]}
+        
+        # Load tiles and compute frequencies
+        frequency_data = []
+        for h5ad_file in sorted(self.processed_h5ad_dir.glob('*_adata_cns.h5ad')):
+            tile_name = h5ad_file.stem.replace('_adata_cns', '')
+            if tile_name in tile_to_group:
+                adata = ad.read_h5ad(h5ad_file)
+                if cn_key in adata.obs.columns:
+                    cn_freq = adata.obs[cn_key].value_counts(normalize=True)
+                    frequency_data.append((tile_name, cn_freq))
+        
+        # Create and sort dataframe
+        frequency_df = pd.DataFrame(dict(frequency_data)).T.fillna(0)
+        # Convert all column names to strings for consistency
+        frequency_df.columns = [str(col) for col in frequency_df.columns]
+        # Sort columns by CN ID
+        cn_ids = sorted([int(col) for col in frequency_df.columns])
+        frequency_df = frequency_df[[str(cn_id) for cn_id in cn_ids]]
+        
+        # Sort tiles by group, then by tile name
+        group_order = {group: idx for idx, group in enumerate(groups)}
+        sorted_tiles = sorted(frequency_df.index, 
+                            key=lambda t: (group_order.get(tile_to_group.get(t, ''), 999), t))
+        frequency_df = frequency_df.reindex(sorted_tiles)
+        
+        # Setup colors and plot
+        max_cn = max(cn_ids)
+        colors = [sns.color_palette(color_palette, max_cn)[cn_id - 1] for cn_id in cn_ids]
+        
+        fig, ax = plt.subplots(figsize=figsize)
+        frequency_df.plot(kind='bar', stacked=True, ax=ax, color=colors, width=0.8, legend=False)
+        
+        # Create legend
+        from matplotlib.patches import Rectangle
+        legend_handles = [
+            Rectangle((0, 0), 1, 1, facecolor=color, edgecolor='black', linewidth=0.5, alpha=1.0)
+            for color in colors
+        ]
+        legend_labels = [f'CN {cn_id}' for cn_id in cn_ids]
+        
+        # Calculate group boundaries and set x-axis labels
+        group_boundaries = {}
+        current_idx = 0
+        for group_name in groups:
+            group_tiles = [t for t in sorted_tiles if tile_to_group.get(t) == group_name]
+            if group_tiles:
+                n_tiles = len(group_tiles)
+                group_boundaries[group_name] = (current_idx, current_idx + n_tiles - 1)
+                current_idx += n_tiles
+        
+        # Set group labels at center of each group
+        x_positions = [(start + end) / 2.0 for start, end in group_boundaries.values()]
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(list(group_boundaries.keys()), rotation=45, ha='right', 
+                          fontsize=11, fontweight='bold')
+        
+        # Add separator lines between groups
+        for start, end in list(group_boundaries.values())[:-1]:
+            ax.axvline(x=end + 0.5, color='black', linestyle='--', linewidth=2.5)
+        
+        # Formatting
+        ax.set_xlabel('Group', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Frequency (Proportion)', fontsize=12, fontweight='bold')
+        ax.set_title('Cellular Neighborhood Frequency by Tile (Grouped by Category)',
+                    fontsize=14, fontweight='bold', pad=15)
+        ax.legend(handles=legend_handles, labels=legend_labels,
+                 title='Cellular Neighborhood', bbox_to_anchor=(1.05, 1),
+                 loc='upper left', fontsize=9)
+        ax.grid(axis='y', alpha=0.3, linestyle='--')
+        
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"  ✓ Saved combined per-tile frequency to: {save_path}")
+        plt.close(fig)
+    
     def analyze_group(
         self,
         group_name: str,
         cn_key: str = 'cn_celltype',
         celltype_key: str = 'cell_type',
-        color_palette: str = 'Set2'
+        color_palette: str = 'tab20'
     ):
         """Run complete analysis for a single group."""
         print(f"\n{'='*80}")
@@ -602,15 +704,8 @@ class GroupCNAnalyzer:
             color_palette=color_palette
         )
         
-        # Visualize per-tile frequency with highlighting
-        per_tile_path = self.output_dir / f'neighborhood_frequency_per_tile_{group_name}.png'
-        self.visualize_per_tile_frequency_highlighted(
-            self.processed_h5ad_dir,
-            group_name,
-            cn_key=cn_key,
-            save_path=str(per_tile_path),
-            color_palette=color_palette
-        )
+        # Note: Per-tile frequency visualization is now done for all groups together
+        # in analyze_all_groups() to show bars clustered by group
         
         print(f"\n✓ Group analysis complete for: {group_name}")
         print(f"  Total cells: {adata.n_obs:,}")
@@ -620,7 +715,7 @@ class GroupCNAnalyzer:
         self,
         cn_key: str = 'cn_celltype',
         celltype_key: str = 'cell_type',
-        color_palette: str = 'Set2'
+        color_palette: str = 'tab20'
     ):
         """Run analysis for all groups."""
         banner = "=" * 80
@@ -637,6 +732,17 @@ class GroupCNAnalyzer:
         for group in groups:
             self.analyze_group(group, cn_key, celltype_key, color_palette)
         
+        # Generate combined per-tile frequency figure for all groups
+        print(f"\n{'='*80}")
+        print("GENERATING COMBINED PER-TILE FREQUENCY FIGURE")
+        print(f"{'='*80}")
+        per_tile_path = self.output_dir / 'neighborhood_frequency_per_tile_all_groups.png'
+        self.visualize_all_groups_per_tile_frequency(
+            cn_key=cn_key,
+            save_path=str(per_tile_path),
+            color_palette=color_palette
+        )
+        
         print(f"\n{banner}")
         print("ALL GROUP ANALYSES COMPLETE!")
         print(f"{banner}")
@@ -645,7 +751,8 @@ class GroupCNAnalyzer:
         print(f"  - cell_fraction_difference_{{group}}.png (heatmap with difference from overall)")
         print(f"  - cn_cell_fraction_{{group}}.csv (composition data)")
         print(f"  - neighborhood_frequency_{{group}}.png")
-        print(f"  - neighborhood_frequency_per_tile_{{group}}.png (with highlighted tiles)")
+        print(f"\nCombined figure for all groups:")
+        print(f"  - neighborhood_frequency_per_tile_all_groups.png (bars clustered by group)")
 
 
 def main():
@@ -682,8 +789,8 @@ def main():
     )
     parser.add_argument(
         '--color_palette',
-        default='Set2',
-        help='Color palette (default: Set2)'
+        default='tab20',
+        help='Color palette (default: tab20, supports up to 20 distinct colors)'
     )
     parser.add_argument(
         '--group',

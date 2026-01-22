@@ -447,7 +447,7 @@ class UnifiedCellularNeighborhoodDetector:
         cn_key: str = 'cn_celltype',
         coord_key: str = 'spatial_original',
         point_size: float = 10.0,
-        palette: str = 'Set2',
+        palette: str = 'tab20',
         k: Optional[int] = None,
         n_clusters: Optional[int] = None
     ):
@@ -570,7 +570,7 @@ class UnifiedCellularNeighborhoodDetector:
         group_by_tile: bool = False,
         figsize: Tuple[int, int] = (12, 6),
         save_path: Optional[str] = None,
-        color_palette: str = 'Set2',
+        color_palette: str = 'tab20',
         show_tile_names: bool = False
     ):
         """
@@ -587,7 +587,7 @@ class UnifiedCellularNeighborhoodDetector:
         save_path : str, optional
             Path to save figure
         color_palette : str
-            Color palette name for the plot (default: 'Set2' to match individual tile maps)
+            Color palette name for the plot (default: 'tab20' to match individual tile maps)
         show_tile_names : bool, default=False
             Whether to display tile names on x-axis when group_by_tile=True (default: False to hide names)
         """
@@ -595,7 +595,7 @@ class UnifiedCellularNeighborhoodDetector:
         
         frequency_df = self.calculate_neighborhood_frequency(cn_key, group_by_tile)
         
-        # Get CN colors matching individual tile maps (Set2 palette)
+        # Get CN colors matching individual tile maps (tab20 palette)
         n_cns = len(self.combined_adata.obs[cn_key].cat.categories)
         colors_palette = sns.color_palette(color_palette, n_cns)
         

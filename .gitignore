@@ -8,3 +8,6 @@ quantitative_analysis/batch_aggregated_filtered_50.csv
 neighborhood_composition/spatial_contexts/cn_unified_results/processed_h5ad/JN_TS_001_margin_tile_6847_16838_adata_cns.h5ad
 *.h5ad
 /neighborhood_composition/spatial_contexts/cn_unified_results
+/neighborhood_composition/spatial_contexts/cn_unified_results_groups
+quantitative_analysis/bray_curtis_dissimilarity.csv
+bray_curtis_dissimilarity.csv
