@@ -9,9 +9,6 @@ Features:
 - Computes mean, std, median statistics
 - Generates interaction consistency analysis
 - Creates summary reports and visualizations
-
-Author: Generated with Claude Code
-Date: 2025-01-15
 """
 
 import numpy as np
@@ -85,7 +82,7 @@ def find_processed_tiles(input_dir):
 
 
 def aggregate_results(
-    input_dir='cti_multiple_tiles',
+    input_dir='cti_multiple_tiles', # was 'cti_multiple_tiles'
     n_perms=None,
     n_neighbors=None,
     cluster_key='cell_type'

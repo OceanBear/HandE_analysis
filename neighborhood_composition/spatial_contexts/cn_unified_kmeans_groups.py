@@ -1,11 +1,14 @@
 """
-Group-based Cellular Neighborhood Analysis
+Group-based Cellular Neighborhood Analysis and Visualization
 
-This script analyzes pre-computed unified CN results by groups (adjacent_tissue, center, margin).
-It reads processed h5ad files from unified CN detection and generates group-specific visualizations.
-
-Author: Generated with Claude Code
-Date: 2025-11-19
+This script reads processed h5ad files from cn_unified_kmeans.py and generates:
+1. Unified analysis visualizations (unified_analysis folder):
+   - Unified CN composition heatmap
+   - Overall and per-tile neighborhood frequency graphs
+2. Individual tile spatial CN maps (individual_tiles folder)
+3. Group-specific analysis (2mm_groups folder):
+   - Group-based CN composition comparisons
+   - Group-specific frequency visualizations
 """
 
 import numpy as np
@@ -18,12 +21,59 @@ import matplotlib.patheffects as path_effects
 import seaborn as sns
 import json
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
 # Get the directory where this script is located
 SCRIPT_DIR = Path(__file__).parent.resolve()
+
+
+def _is_integer_cn_labels(labels) -> bool:
+    """Check if CN labels are integers (1, 2, 3) vs strings (CN1, CN3-1)."""
+    for x in labels:
+        try:
+            int(float(str(x).strip()))
+        except (ValueError, TypeError):
+            return False
+    return True
+
+
+def _sort_cn_labels_and_colors(labels, color_palette: str = 'tab20'):
+    """
+    Sort CN labels and return (sorted_labels, colors).
+    Supports both integer labels (1, 2, 3) and string labels (CN1, CN2, CN3-1).
+    """
+    labels = list(labels)
+    if not labels:
+        return [], []
+
+    if _is_integer_cn_labels(labels):
+        # Original format: 1, 2, 3, 4, 5
+        int_labels = [int(float(str(x).strip())) for x in labels]
+        sorted_labels = sorted(set(int_labels), key=lambda x: x)
+        n = len(sorted_labels)
+        palette = sns.color_palette(color_palette, max(sorted_labels))
+        colors = [palette[x - 1] for x in sorted_labels]
+        return sorted_labels, colors
+    else:
+        # Sub-clustered format: CN1, CN2, CN3-1, CN3-2, CN4-1, CN4-2, CN5
+        def sort_key(s):
+            s = str(s).strip()
+            if not s.startswith('CN'):
+                return (999, 0)
+            rest = s[2:]
+            if '-' in rest:
+                parts = rest.split('-', 1)
+                return (int(parts[0]) if parts[0].isdigit() else 999,
+                        int(parts[1]) if parts[1].isdigit() else 0)
+            return (int(rest) if rest.isdigit() else 999, 0)
+
+        sorted_labels = sorted(set(labels), key=sort_key)
+        n = len(sorted_labels)
+        palette = sns.color_palette(color_palette, max(n, 20))[:n]
+        colors = list(palette)
+        return sorted_labels, colors
 
 
 class GroupCNAnalyzer:
@@ -61,12 +111,20 @@ class GroupCNAnalyzer:
         with open(self.categories_json, 'r') as f:
             self.categories = json.load(f)
         
-        # Extract tile size from metadata and create subfolder
+        # Store base output directory (for unified_analysis and individual_tiles)
+        self.base_output_dir = base_output_dir
+        self.base_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create unified_analysis and individual_tiles directories at base level
+        (self.base_output_dir / 'unified_analysis').mkdir(exist_ok=True)
+        (self.base_output_dir / 'individual_tiles').mkdir(exist_ok=True)
+        
+        # Extract tile size from metadata and create subfolder for group analysis
         tile_size_mm = self.categories.get('metadata', {}).get('tile_size_mm2', 2.0)
         # Convert to string like "2mm" (assuming integer tile sizes)
         tile_size_folder = f"{int(tile_size_mm)}mm_groups"
         
-        # Create output directory with tile size subfolder
+        # Create output directory with tile size subfolder (for group-specific analysis)
         self.output_dir = base_output_dir / tile_size_folder
         
         # Create directory - handle edge cases robustly
@@ -89,7 +147,8 @@ class GroupCNAnalyzer:
         
         print(f"✓ Loaded tile categories from: {self.categories_json}")
         print(f"  Groups: {list(self.categories.keys() - {'metadata'})}")
-        print(f"  Output directory: {self.output_dir}")
+        print(f"  Base output directory: {self.base_output_dir}")
+        print(f"  Group analysis output: {self.output_dir}")
         
     def load_group_data(
         self,
@@ -121,6 +180,8 @@ class GroupCNAnalyzer:
         print(f"\nLoading {len(tile_names)} tiles for group: {group_name}")
         
         adata_list = []
+        cell_type_categories = None  # Will store the categorical order from first tile
+        
         for i, tile_name in enumerate(tile_names, 1):
             h5ad_file = self.processed_h5ad_dir / f'{tile_name}_adata_cns.h5ad'
             
@@ -135,6 +196,22 @@ class GroupCNAnalyzer:
                 print(f"  [{i}/{len(tile_names)}] Warning: {cn_key} not in {tile_name}, skipping")
                 continue
             
+            # Preserve categorical order from first tile
+            if pd.api.types.is_categorical_dtype(adata.obs[celltype_key]):
+                if cell_type_categories is None:
+                    # Store the categorical order from the first tile
+                    cell_type_categories = adata.obs[celltype_key].cat.categories.tolist()
+                else:
+                    # Ensure all subsequent tiles use the same categorical order
+                    adata.obs[celltype_key] = adata.obs[celltype_key].astype('category')
+                    adata.obs[celltype_key] = adata.obs[celltype_key].cat.set_categories(
+                        cell_type_categories, ordered=True
+                    )
+            elif cell_type_categories is None:
+                # If first tile is not categorical, convert and store order
+                adata.obs[celltype_key] = pd.Categorical(adata.obs[celltype_key])
+                cell_type_categories = adata.obs[celltype_key].cat.categories.tolist()
+            
             print(f"  [{i}/{len(tile_names)}] Loaded {tile_name}: {adata.n_obs} cells")
             adata_list.append(adata)
         
@@ -143,6 +220,15 @@ class GroupCNAnalyzer:
         
         # Combine
         combined_adata = ad.concat(adata_list, join='outer', index_unique='-')
+        
+        # Ensure the combined adata preserves the categorical order
+        if cell_type_categories is not None:
+            if pd.api.types.is_categorical_dtype(combined_adata.obs[celltype_key]):
+                # Re-set categories to ensure order is preserved
+                combined_adata.obs[celltype_key] = combined_adata.obs[celltype_key].cat.set_categories(
+                    cell_type_categories, ordered=True
+                )
+        
         print(f"✓ Combined {len(adata_list)} tiles: {combined_adata.n_obs:,} cells")
         
         return combined_adata
@@ -159,25 +245,505 @@ class GroupCNAnalyzer:
             adata.obs[celltype_key],
             normalize='index'
         )
+        
+        # Ensure columns follow the categorical order from the original h5ad files
+        if pd.api.types.is_categorical_dtype(adata.obs[celltype_key]):
+            cell_type_order = adata.obs[celltype_key].cat.categories.tolist()
+            # Reorder columns to match categorical order
+            existing_cols = [col for col in cell_type_order if col in composition.columns]
+            # Add any columns that exist in composition but not in categorical (shouldn't happen, but safe)
+            remaining_cols = [col for col in composition.columns if col not in existing_cols]
+            final_cols = existing_cols + remaining_cols
+            composition = composition[final_cols]
+        
         composition_zscore = composition.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
         return composition, composition_zscore
     
-    def load_overall_composition(self) -> pd.DataFrame:
-        """Load overall CN composition from unified analysis results."""
-        # Look for the unified composition file in the parent directory of processed_h5ad
-        # e.g., if processed_h5ad is ".../2mm_all_17_clusters=7/processed_h5ad"
-        # look for ".../2mm_all_17_clusters=7/unified_analysis/unified_cn_composition.csv"
+    def load_overall_composition(self, cn_key: str = 'cn_celltype') -> Optional[pd.DataFrame]:
+        """
+        Load overall CN composition from unified analysis results.
+        For sub-clustered data (cn_key='cn_celltype_sub'), looks for unified_cn_composition_sub.csv.
+        """
         unified_dir = self.processed_h5ad_dir.parent / 'unified_analysis'
-        overall_comp_file = unified_dir / 'unified_cn_composition.csv'
-        
+        # Sub-clustered results use unified_cn_composition_sub.csv
+        if cn_key == 'cn_celltype_sub':
+            overall_comp_file = unified_dir / 'unified_cn_composition_sub.csv'
+        else:
+            overall_comp_file = unified_dir / 'unified_cn_composition.csv'
+
         if overall_comp_file.exists():
-            overall_composition = pd.read_csv(overall_comp_file, index_col=0)
-            # Compute Z-scores
-            overall_zscore = overall_composition.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
-            return overall_zscore
+            try:
+                overall_composition = pd.read_csv(overall_comp_file, index_col=0)
+                overall_zscore = overall_composition.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
+                return overall_zscore
+            except (OSError, IOError, pd.errors.EmptyDataError, pd.errors.ParserError) as e:
+                print(f"  Warning: Error reading overall composition file: {e}")
+                return None
         else:
             print(f"  Warning: Overall composition file not found at {overall_comp_file}")
             return None
+    
+    def load_all_processed_tiles(
+        self,
+        cn_key: str = 'cn_celltype',
+        celltype_key: str = 'cell_type'
+    ) -> ad.AnnData:
+        """
+        Load all processed h5ad files and combine them into a single AnnData object.
+        
+        Parameters:
+        -----------
+        cn_key : str
+            Key in adata.obs containing CN labels
+        celltype_key : str
+            Key in adata.obs containing cell type labels
+            
+        Returns:
+        --------
+        combined_adata : AnnData
+            Combined AnnData object with all tiles
+        """
+        print(f"\nLoading all processed h5ad files from: {self.processed_h5ad_dir}")
+        
+        h5ad_files = sorted(self.processed_h5ad_dir.glob('*_adata_cns.h5ad'))
+        
+        if not h5ad_files:
+            raise ValueError(f"No processed h5ad files found in {self.processed_h5ad_dir}")
+        
+        print(f"Found {len(h5ad_files)} processed h5ad files")
+        
+        adata_list = []
+        cell_type_categories = None  # Will store the categorical order from first tile
+        
+        for i, h5ad_file in enumerate(h5ad_files, 1):
+            tile_name = h5ad_file.stem.replace('_adata_cns', '')
+            print(f"  [{i}/{len(h5ad_files)}] Loading {tile_name}...")
+            
+            try:
+                adata = ad.read_h5ad(h5ad_file)
+                
+                # Ensure required keys exist
+                if cn_key not in adata.obs.columns:
+                    print(f"    Warning: {cn_key} not found, skipping")
+                    continue
+                
+                if celltype_key not in adata.obs.columns:
+                    print(f"    Warning: {celltype_key} not found, skipping")
+                    continue
+                
+                # Preserve categorical order from first tile
+                if pd.api.types.is_categorical_dtype(adata.obs[celltype_key]):
+                    if cell_type_categories is None:
+                        # Store the categorical order from the first tile
+                        cell_type_categories = adata.obs[celltype_key].cat.categories.tolist()
+                        print(f"    ✓ Preserving cell type order from first tile: {cell_type_categories}")
+                    else:
+                        # Ensure all subsequent tiles use the same categorical order
+                        adata.obs[celltype_key] = adata.obs[celltype_key].astype('category')
+                        adata.obs[celltype_key] = adata.obs[celltype_key].cat.set_categories(
+                            cell_type_categories, ordered=True
+                        )
+                elif cell_type_categories is None:
+                    # If first tile is not categorical, convert and store order
+                    adata.obs[celltype_key] = pd.Categorical(adata.obs[celltype_key])
+                    cell_type_categories = adata.obs[celltype_key].cat.categories.tolist()
+                    print(f"    ✓ Cell types converted to categorical, order: {cell_type_categories}")
+                
+                # Add tile identifier if not present
+                if 'tile_name' not in adata.obs.columns:
+                    adata.obs['tile_name'] = tile_name
+                
+                adata_list.append(adata)
+                print(f"    ✓ Loaded {adata.n_obs} cells")
+                
+            except Exception as e:
+                print(f"    ✗ Error loading {h5ad_file}: {str(e)}")
+                continue
+        
+        if not adata_list:
+            raise ValueError("No valid h5ad files could be loaded")
+        
+        print(f"\nCombining {len(adata_list)} tiles...")
+        combined_adata = ad.concat(adata_list, join='outer', index_unique='-')
+        
+        # Ensure the combined adata preserves the categorical order
+        if cell_type_categories is not None:
+            if pd.api.types.is_categorical_dtype(combined_adata.obs[celltype_key]):
+                # Re-set categories to ensure order is preserved
+                combined_adata.obs[celltype_key] = combined_adata.obs[celltype_key].cat.set_categories(
+                    cell_type_categories, ordered=True
+                )
+        
+        print(f"✓ Combined dataset: {combined_adata.n_obs:,} cells")
+        print(f"  Tiles: {combined_adata.obs['tile_name'].nunique()}")
+        print(f"  Cell types: {combined_adata.obs[celltype_key].nunique()}")
+        
+        return combined_adata
+    
+    def compute_unified_cn_composition(
+        self,
+        adata: ad.AnnData,
+        cn_key: str = 'cn_celltype',
+        celltype_key: str = 'cell_type'
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """Compute unified cell phenotype fractions in each CN across ALL tiles."""
+        print("\nComputing unified CN composition across all tiles...")
+
+        composition = pd.crosstab(
+            adata.obs[cn_key],
+            adata.obs[celltype_key],
+            normalize='index'
+        )
+        
+        # Ensure columns follow the categorical order from the original h5ad files
+        if pd.api.types.is_categorical_dtype(adata.obs[celltype_key]):
+            cell_type_order = adata.obs[celltype_key].cat.categories.tolist()
+            # Reorder columns to match categorical order
+            existing_cols = [col for col in cell_type_order if col in composition.columns]
+            # Add any columns that exist in composition but not in categorical (shouldn't happen, but safe)
+            remaining_cols = [col for col in composition.columns if col not in existing_cols]
+            final_cols = existing_cols + remaining_cols
+            composition = composition[final_cols]
+        
+        composition_zscore = composition.apply(lambda x: (x - x.mean()) / x.std(), axis=0)
+
+        print(f"  ✓ Composition matrix shape: {composition.shape}")
+        return composition, composition_zscore
+    
+    def _get_spatial_coords(self, adata, coord_key: str = 'spatial'):
+        """Get spatial coordinates with fallback options."""
+        if coord_key in adata.obsm:
+            return adata.obsm[coord_key]
+        elif 'spatial' in adata.obsm:
+            return adata.obsm['spatial']
+        return None
+    
+    def _log_progress(self, current: int, total: int, prefix: str = ""):
+        """Helper method for consistent progress logging."""
+        return f"  [{current}/{total}] {prefix}"
+    
+    def visualize_unified_cn_composition(
+        self,
+        adata: ad.AnnData,
+        composition_zscore: pd.DataFrame,
+        k: int,
+        n_clusters: int,
+        figsize: Tuple[int, int] = (12, 8),
+        cmap: str = 'coolwarm',
+        vmin: float = -2,
+        vmax: float = 2,
+        save_path: Optional[str] = None,
+        show_values: bool = True
+    ):
+        """Visualize unified CN composition as heatmap across ALL tiles.
+        
+        Note: composition_zscore should preserve the cell type order from the original h5ad files.
+        """
+        print("\nVisualizing unified CN composition heatmap...")
+
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Create heatmap (order should be preserved from original h5ad files)
+        sns.heatmap(
+            composition_zscore,
+            cmap=cmap,
+            center=0,
+            vmin=vmin,
+            vmax=vmax,
+            cbar_kws={'label': 'Z-score'},
+            linewidths=0.5,
+            linecolor='white',
+            ax=ax,
+            annot=show_values,
+            fmt='.2f' if show_values else '',
+            annot_kws={'size': 12}
+        )
+
+        ax.set_xlabel('Cell Type', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Cellular Neighborhood', fontsize=12, fontweight='bold')
+        
+        n_tiles = adata.obs['tile_name'].nunique()
+        n_cells = adata.n_obs
+        title = (f'Unified Cell Type Composition by Cellular Neighborhood\n'
+                f'(k={k}, n_clusters={n_clusters}, {n_tiles} tiles, {n_cells:,} cells)\n'
+                f'Z-score scaled by column')
+        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+
+        # Rotate labels
+        plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+        plt.setp(ax.get_yticklabels(), rotation=0)
+
+        plt.tight_layout()
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"  ✓ Saved unified heatmap to: {save_path}")
+
+        plt.close(fig)
+        return fig
+    
+    def visualize_individual_tile_cns(
+        self,
+        adata: ad.AnnData,
+        cn_key: str = 'cn_celltype',
+        coord_key: str = 'spatial',
+        point_size: float = 10.0,
+        palette: str = 'tab20',
+        k: Optional[int] = None,
+        n_clusters: Optional[int] = None
+    ):
+        """Visualize cellular neighborhoods spatially for each tile."""
+        print(f"\nGenerating individual spatial CN maps for each tile...")
+
+        # Get unique tiles
+        unique_tiles = adata.obs['tile_name'].unique()
+        
+        # Get CN labels and colors
+        n_cns = len(adata.obs[cn_key].cat.categories)
+        if n_cns <= 20:
+            colors_palette = sns.color_palette(palette, n_cns)
+        else:
+            colors_palette = sns.color_palette('husl', n_cns)
+
+        # Process each tile
+        for tile_idx, tile_name in enumerate(unique_tiles, 1):
+            print(self._log_progress(tile_idx, len(unique_tiles), f"Plotting {tile_name}"))
+            
+            # Get cells from this tile
+            tile_mask = adata.obs['tile_name'] == tile_name
+            tile_adata = adata[tile_mask]
+            
+            # Get spatial coordinates
+            coords = self._get_spatial_coords(tile_adata, coord_key)
+            if coords is None:
+                print(f"    Warning: No spatial coordinates found for {tile_name}, skipping...")
+                continue
+            
+            cn_labels = tile_adata.obs[cn_key].values
+
+            # Create figure
+            fig, ax = plt.subplots(figsize=(10, 10))
+
+            # Plot each CN (support both integer and string labels e.g. CN3-1)
+            unique_cns = np.unique(cn_labels)
+            sorted_labels, colors_list = _sort_cn_labels_and_colors(unique_cns, palette)
+            label_to_color = dict(zip(sorted_labels, colors_list))
+
+            for cn_id in unique_cns:
+                cn_mask = cn_labels == cn_id
+                color = label_to_color.get(cn_id, colors_list[0] if colors_list else 'gray')
+                legend_label = str(cn_id) if str(cn_id).startswith('CN') else f'CN {cn_id}'
+                ax.scatter(
+                    coords[cn_mask, 0],
+                    coords[cn_mask, 1],
+                    c=[color],
+                    s=point_size,
+                    alpha=0.7,
+                    label=legend_label
+                )
+
+            ax.set_xlabel('X coordinate (pixels)', fontsize=12)
+            ax.set_ylabel('Y coordinate (pixels)', fontsize=12)
+            ax.set_aspect('equal')
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+
+            # Add title with parameters
+            title = f'Cellular Neighborhoods: {tile_name}'
+            if k is not None and n_clusters is not None:
+                title += f'\n(k={k}, n_clusters={n_clusters}, {tile_adata.n_obs:,} cells)'
+            ax.set_title(title, fontsize=14, fontweight='bold', pad=15)
+
+            # Add legend
+            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=10)
+
+            plt.tight_layout()
+
+            # Save figure with tile-specific naming
+            save_path = self.base_output_dir / 'individual_tiles' / f'spatial_cns_{tile_name}.png'
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.close()
+
+            print(f"    ✓ Saved to: {save_path}")
+
+        print(f"  ✓ Generated {len(unique_tiles)} spatial CN maps")
+    
+    def calculate_unified_neighborhood_frequency(
+        self,
+        adata: ad.AnnData,
+        cn_key: str = 'cn_celltype',
+        group_by_tile: bool = False
+    ) -> pd.DataFrame:
+        """
+        Calculate the frequency of each cellular neighborhood.
+        
+        Parameters:
+        -----------
+        adata : AnnData
+            Combined AnnData object
+        cn_key : str
+            Key in adata.obs containing CN labels
+        group_by_tile : bool
+            If True, calculate frequency per tile. If False, calculate overall frequency.
+            
+        Returns:
+        --------
+        frequency_df : DataFrame
+            DataFrame with CN frequencies (counts and percentages)
+        """
+        print(f"\nCalculating neighborhood frequency...")
+        
+        if group_by_tile:
+            # Frequency per tile
+            frequency_df = pd.crosstab(
+                adata.obs['tile_name'],
+                adata.obs[cn_key],
+                normalize='index'  # Percentages per tile
+            )
+            print(f"  ✓ Calculated CN frequency per tile")
+        else:
+            # Overall frequency
+            cn_counts = adata.obs[cn_key].value_counts().sort_index()
+            total_cells = len(adata.obs)
+            cn_percentages = (cn_counts / total_cells * 100).round(2)
+            
+            frequency_df = pd.DataFrame({
+                'Count': cn_counts,
+                'Percentage': cn_percentages
+            })
+            frequency_df.index.name = 'Cellular_Neighborhood'
+            frequency_df = frequency_df.reset_index()
+            print(f"  ✓ Calculated overall CN frequency")
+            print(f"    Total cells: {total_cells:,}")
+        
+        return frequency_df
+    
+    def visualize_unified_neighborhood_frequency(
+        self,
+        adata: ad.AnnData,
+        cn_key: str = 'cn_celltype',
+        group_by_tile: bool = False,
+        figsize: Tuple[int, int] = (12, 6),
+        save_path: Optional[str] = None,
+        color_palette: str = 'tab20',
+        show_tile_names: bool = False
+    ):
+        """
+        Generate a graph showing neighborhood frequency.
+        
+        Parameters:
+        -----------
+        adata : AnnData
+            Combined AnnData object
+        cn_key : str
+            Key in adata.obs containing CN labels
+        group_by_tile : bool
+            If True, show frequency per tile. If False, show overall frequency.
+        figsize : tuple
+            Figure size (width, height)
+        save_path : str, optional
+            Path to save figure
+        color_palette : str
+            Color palette name for the plot (default: 'tab20' to match individual tile maps)
+        show_tile_names : bool, default=False
+            Whether to display tile names on x-axis when group_by_tile=True (default: False to hide names)
+        """
+        print(f"\nGenerating neighborhood frequency graph...")
+        
+        frequency_df = self.calculate_unified_neighborhood_frequency(adata, cn_key, group_by_tile)
+        
+        # Get CN colors matching individual tile maps (tab20 palette)
+        n_cns = len(adata.obs[cn_key].cat.categories)
+        if n_cns <= 20:
+            colors_palette = sns.color_palette(color_palette, n_cns)
+        else:
+            colors_palette = sns.color_palette('husl', n_cns)
+        
+        if group_by_tile:
+            # Stacked bar chart showing frequency per tile
+            fig, ax = plt.subplots(figsize=figsize)
+            
+            # Ensure columns are sorted (support both integer and string CN labels)
+            sorted_labels, colors_sorted = _sort_cn_labels_and_colors(frequency_df.columns, color_palette)
+            sorted_cols = [c for c in sorted_labels if c in frequency_df.columns]
+            frequency_df_sorted = frequency_df[sorted_cols]
+            
+            frequency_df_sorted.plot(kind='bar', stacked=True, ax=ax, 
+                                     color=colors_sorted, width=0.8)
+            
+            ax.set_xlabel('Tile', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Frequency (Proportion)', fontsize=12, fontweight='bold')
+            ax.set_title('Cellular Neighborhood Frequency by Tile', 
+                        fontsize=14, fontweight='bold', pad=15)
+            ax.legend(title='Cellular Neighborhood', bbox_to_anchor=(1.05, 1), 
+                     loc='upper left', fontsize=9)
+            if show_tile_names:
+                ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+            else:
+                # Hide tile names by default
+                ax.set_xticklabels([])
+            ax.grid(axis='y', alpha=0.3, linestyle='--')
+            
+            plt.tight_layout()
+        else:
+            # SINGLE bar chart showing CN Frequency (Count) only, with percentage annotations
+            plt.close('all')
+            fig, ax = plt.subplots(1, 1, figsize=figsize)
+            
+            # Sort by CN ID (support both integer and string CN labels)
+            cn_labels_col = frequency_df['Cellular_Neighborhood']
+            sorted_labels, colors_list = _sort_cn_labels_and_colors(cn_labels_col, color_palette)
+            order = {lab: i for i, lab in enumerate(sorted_labels)}
+            frequency_df_sorted = frequency_df.copy()
+            frequency_df_sorted['_ord'] = frequency_df_sorted['Cellular_Neighborhood'].map(order)
+            frequency_df_sorted = frequency_df_sorted.sort_values('_ord').drop(columns=['_ord'])
+            colors_for_bars = [colors_list[order[lab]] for lab in frequency_df_sorted['Cellular_Neighborhood']]
+            
+            # Create bars with count as height
+            bars = ax.bar(frequency_df_sorted['Cellular_Neighborhood'].astype(str), 
+                         frequency_df_sorted['Count'], 
+                         color=colors_for_bars)
+            
+            ax.set_xlabel('Cellular Neighborhood', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Cell Count', fontsize=12, fontweight='bold')
+            ax.set_title('CN Frequency (Count)', 
+                        fontsize=14, fontweight='bold', pad=15)
+            ax.grid(axis='y', alpha=0.3, linestyle='--')
+            
+            # Add count labels above bars and percentage annotations in the middle
+            text_outline = [path_effects.withStroke(linewidth=3, foreground='white')]
+            for bar, count, pct in zip(bars, 
+                                      frequency_df_sorted['Count'], 
+                                      frequency_df_sorted['Percentage']):
+                height = bar.get_height()
+                # Count label above bar
+                ax.text(bar.get_x() + bar.get_width()/2., height,
+                       f'{int(count):,}',
+                       ha='center', va='bottom', fontsize=14, fontweight='bold',
+                       color='black', path_effects=text_outline)
+                # Percentage annotation in the middle of bar
+                ax.text(bar.get_x() + bar.get_width()/2., height/2,
+                       f'{pct:.1f}%',
+                       ha='center', va='center', fontsize=14, 
+                       color='black', fontweight='bold', path_effects=text_outline)
+            
+            # Rotate x-axis labels
+            plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+            
+            plt.tight_layout()
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"  ✓ Saved frequency graph to: {save_path}")
+        
+        # Save frequency data to CSV (only save overall frequency CSV, per-tile is in the per-tile figure)
+        if not group_by_tile:
+            csv_path = self.base_output_dir / 'unified_analysis' / 'neighborhood_frequency.csv'
+            frequency_df.to_csv(csv_path, index=False)
+            print(f"  ✓ Saved frequency data to: {csv_path}")
+        
+        plt.close(fig)
+        return fig
     
     def visualize_cn_composition_heatmap(
         self,
@@ -202,16 +768,12 @@ class GroupCNAnalyzer:
         overall_zscore : pd.DataFrame, optional
             Overall composition Z-scores for comparison
         """
-        # Define the correct cell type order
-        cell_type_order = [
-            "Undefined",
-            "Epithelium (PD-L1lo/Ki67lo)",
-            "Epithelium (PD-L1hi/Ki67hi)",
-            "Macrophage",
-            "Lymphocyte",
-            "Vascular",
-            "Fibroblast/Stroma"
-        ]
+        # Get the correct cell type order from overall_zscore if available (preserves order from original h5ad files)
+        # Otherwise, use the order from composition_zscore
+        if overall_zscore is not None:
+            cell_type_order = overall_zscore.columns.tolist()
+        else:
+            cell_type_order = composition_zscore.columns.tolist()
         
         fig, ax = plt.subplots(figsize=figsize)
         
@@ -221,7 +783,7 @@ class GroupCNAnalyzer:
             common_rows = composition_zscore.index.intersection(overall_zscore.index)
             common_cols = composition_zscore.columns.intersection(overall_zscore.columns)
             
-            # Reorder columns according to the specified cell type order
+            # Reorder columns according to the cell type order from overall_zscore
             # Keep only columns that exist in both dataframes and in the order list
             ordered_cols = [col for col in cell_type_order if col in common_cols]
             # Add any remaining columns that weren't in the order list (at the end)
@@ -266,12 +828,8 @@ class GroupCNAnalyzer:
                     f'Format: Difference(Group Z-score)')
         else:
             # Fallback if overall not available
-            # Reorder columns according to the specified cell type order
-            existing_cols = list(composition_zscore.columns)
-            ordered_cols = [col for col in cell_type_order if col in existing_cols]
-            remaining_cols = [col for col in existing_cols if col not in ordered_cols]
-            final_cols = ordered_cols + remaining_cols
-            composition_zscore_ordered = composition_zscore[final_cols]
+            # Use the order from composition_zscore (should preserve order from original h5ad files)
+            composition_zscore_ordered = composition_zscore[cell_type_order] if all(col in composition_zscore.columns for col in cell_type_order) else composition_zscore
             
             sns.heatmap(
                 composition_zscore_ordered,
@@ -337,14 +895,14 @@ class GroupCNAnalyzer:
         plt.close('all')
         fig, ax = plt.subplots(1, 1, figsize=figsize)
         
-        # Sort by CN ID
-        frequency_df_sorted = frequency_df.sort_values('Cellular_Neighborhood')
-        cn_ids = [int(cn_id) for cn_id in frequency_df_sorted['Cellular_Neighborhood']]
-        
-        # Get colors
-        n_cns = len(cn_ids)
-        colors_palette = sns.color_palette(color_palette, max(cn_ids))
-        colors_for_bars = [colors_palette[int(cn_id) - 1] for cn_id in cn_ids]
+        # Sort by CN ID (support both integer and string CN labels)
+        cn_labels_col = frequency_df['Cellular_Neighborhood']
+        sorted_labels, colors_list = _sort_cn_labels_and_colors(cn_labels_col, color_palette)
+        order = {lab: i for i, lab in enumerate(sorted_labels)}
+        frequency_df_sorted = frequency_df.copy()
+        frequency_df_sorted['_ord'] = frequency_df_sorted['Cellular_Neighborhood'].map(order)
+        frequency_df_sorted = frequency_df_sorted.sort_values('_ord').drop(columns=['_ord'])
+        colors_for_bars = [colors_list[order[lab]] for lab in frequency_df_sorted['Cellular_Neighborhood']]
         
         # Create bars
         bars = ax.bar(
@@ -436,16 +994,10 @@ class GroupCNAnalyzer:
         frequency_df = pd.DataFrame(cn_frequencies, index=tile_names)
         frequency_df = frequency_df.fillna(0)
         
-        # Sort columns by CN ID
-        cn_ids = sorted([int(col) for col in frequency_df.columns])
-        col_mapping = {int(col): col for col in frequency_df.columns}
-        sorted_cols = [col_mapping[cn_id] for cn_id in cn_ids]
+        # Sort columns by CN ID (support both integer and string CN labels)
+        sorted_labels, colors_sorted = _sort_cn_labels_and_colors(frequency_df.columns, color_palette)
+        sorted_cols = [c for c in sorted_labels if c in frequency_df.columns]
         frequency_df_sorted = frequency_df[sorted_cols]
-        
-        # Get colors
-        colors_palette = sns.color_palette(color_palette, max(cn_ids))
-        color_map = {cn_id: colors_palette[int(cn_id) - 1] for cn_id in cn_ids}
-        colors_sorted = [color_map[cn_id] for cn_id in cn_ids]
         
         # Plot all tiles
         fig, ax = plt.subplots(figsize=figsize)
@@ -479,8 +1031,8 @@ class GroupCNAnalyzer:
                         color = color[:4] if len(color) >= 4 else color
                     cn_colors.append(color)
                     
-                    cn_id = cn_ids[container_idx] if container_idx < len(cn_ids) else container_idx + 1
-                    legend_labels.append(f'CN {cn_id}')
+                    lab = sorted_labels[container_idx] if container_idx < len(sorted_labels) else f'CN{container_idx + 1}'
+                    legend_labels.append(str(lab) if str(lab).startswith('CN') else f'CN {lab}')
         
         # Set transparency for non-group tiles
         # In pandas stacked bar plots, patches are organized by CN first, then by tile
@@ -588,19 +1140,16 @@ class GroupCNAnalyzer:
         frequency_df = pd.DataFrame(dict(frequency_data)).T.fillna(0)
         # Convert all column names to strings for consistency
         frequency_df.columns = [str(col) for col in frequency_df.columns]
-        # Sort columns by CN ID
-        cn_ids = sorted([int(col) for col in frequency_df.columns])
-        frequency_df = frequency_df[[str(cn_id) for cn_id in cn_ids]]
+        # Sort columns by CN ID (support both integer and string CN labels)
+        sorted_labels, colors = _sort_cn_labels_and_colors(frequency_df.columns, color_palette)
+        sorted_cols = [str(c) for c in sorted_labels if str(c) in frequency_df.columns]
+        frequency_df = frequency_df[sorted_cols]
         
         # Sort tiles by group, then by tile name
         group_order = {group: idx for idx, group in enumerate(groups)}
         sorted_tiles = sorted(frequency_df.index, 
                             key=lambda t: (group_order.get(tile_to_group.get(t, ''), 999), t))
         frequency_df = frequency_df.reindex(sorted_tiles)
-        
-        # Setup colors and plot
-        max_cn = max(cn_ids)
-        colors = [sns.color_palette(color_palette, max_cn)[cn_id - 1] for cn_id in cn_ids]
         
         fig, ax = plt.subplots(figsize=figsize)
         frequency_df.plot(kind='bar', stacked=True, ax=ax, color=colors, width=0.8, legend=False)
@@ -611,7 +1160,7 @@ class GroupCNAnalyzer:
             Rectangle((0, 0), 1, 1, facecolor=color, edgecolor='black', linewidth=0.5, alpha=1.0)
             for color in colors
         ]
-        legend_labels = [f'CN {cn_id}' for cn_id in cn_ids]
+        legend_labels = [str(lab) if str(lab).startswith('CN') else f'CN {lab}' for lab in sorted_labels]
         
         # Calculate group boundaries and set x-axis labels
         group_boundaries = {}
@@ -649,6 +1198,172 @@ class GroupCNAnalyzer:
             print(f"  ✓ Saved combined per-tile frequency to: {save_path}")
         plt.close(fig)
     
+    def generate_unified_analysis(
+        self,
+        k: int = 20,
+        n_clusters: int = 7,
+        cn_key: str = 'cn_celltype',
+        celltype_key: str = 'cell_type',
+        color_palette: str = 'tab20'
+    ):
+        """
+        Generate unified analysis visualizations from processed h5ad files.
+        
+        Parameters:
+        -----------
+        k : int
+            Number of nearest neighbors used (for title)
+        n_clusters : int
+            Number of clusters used (for title)
+        cn_key : str
+            Key in adata.obs containing CN labels
+        celltype_key : str
+            Key in adata.obs containing cell type labels
+        color_palette : str
+            Color palette name
+        """
+        print(f"\n{'='*80}")
+        print("GENERATING UNIFIED ANALYSIS VISUALIZATIONS")
+        print(f"{'='*80}")
+        
+        # Load all processed tiles
+        combined_adata = self.load_all_processed_tiles(cn_key, celltype_key)
+        
+        # Compute composition (order preserved from original h5ad files)
+        composition, composition_zscore = self.compute_unified_cn_composition(
+            combined_adata, cn_key, celltype_key
+        )
+        
+        # Save composition CSV (order preserved from original h5ad files)
+        comp_path = self.base_output_dir / 'unified_analysis' / 'unified_cn_composition.csv'
+        composition.to_csv(comp_path)
+        print(f"  ✓ Saved composition to: {comp_path}")
+        
+        # Visualize unified heatmap (order preserved from original h5ad files)
+        heatmap_path = self.base_output_dir / 'unified_analysis' / 'unified_cn_composition_heatmap.png'
+        self.visualize_unified_cn_composition(
+            combined_adata,
+            composition_zscore,
+            k=k,
+            n_clusters=n_clusters,
+            save_path=str(heatmap_path),
+            show_values=True
+        )
+        
+        # Visualize neighborhood frequency distributions
+        # Overall frequency
+        overall_freq_path = self.base_output_dir / 'unified_analysis' / 'neighborhood_frequency_overall.png'
+        self.visualize_unified_neighborhood_frequency(
+            combined_adata,
+            cn_key=cn_key,
+            group_by_tile=False,
+            figsize=(10, 6),
+            save_path=str(overall_freq_path),
+            color_palette=color_palette
+        )
+        
+        # Per-tile frequency
+        per_tile_freq_path = self.base_output_dir / 'unified_analysis' / 'neighborhood_frequency_per_tile.png'
+        self.visualize_unified_neighborhood_frequency(
+            combined_adata,
+            cn_key=cn_key,
+            group_by_tile=True,
+            figsize=(14, 8),
+            save_path=str(per_tile_freq_path),
+            color_palette=color_palette
+        )
+        
+        # Save summary statistics
+        print("\nSaving summary statistics...")
+        tile_names = sorted(combined_adata.obs['tile_name'].unique().tolist())
+        
+        summary = {
+            'analysis_type': 'Unified Cellular Neighborhoods',
+            'n_tiles': len(tile_names),
+            'tile_names': tile_names,
+            'total_cells': int(combined_adata.n_obs),
+            'total_genes': int(combined_adata.n_vars),
+            'parameters': {
+                'k_neighbors': k,
+                'n_clusters': n_clusters,
+                'celltype_key': celltype_key
+            },
+            'cn_distribution': combined_adata.obs[cn_key].value_counts().to_dict(),
+            'cell_type_distribution': combined_adata.obs[celltype_key].value_counts().to_dict(),
+            'cn_composition': composition.to_dict()
+        }
+        
+        # Convert numpy types to native Python types
+        def convert_to_native(obj):
+            converters = {
+                np.integer: int,
+                np.floating: float,
+                np.ndarray: lambda x: x.tolist()
+            }
+            for dtype, converter in converters.items():
+                if isinstance(obj, dtype):
+                    return converter(obj)
+            if isinstance(obj, dict):
+                return {k: convert_to_native(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [convert_to_native(item) for item in obj]
+            return obj
+        
+        summary = convert_to_native(summary)
+        
+        # Save summary
+        summary_path = self.base_output_dir / 'unified_analysis' / 'unified_cn_summary.json'
+        with open(summary_path, 'w') as f:
+            json.dump(summary, f, indent=2)
+        print(f"  ✓ Saved summary to: {summary_path}")
+        
+        print(f"\n✓ Unified analysis complete!")
+        print(f"  Results saved to: {self.base_output_dir}/unified_analysis/")
+    
+    def generate_individual_tiles(
+        self,
+        k: int = 20,
+        n_clusters: int = 7,
+        cn_key: str = 'cn_celltype',
+        coord_key: str = 'spatial',
+        palette: str = 'tab20'
+    ):
+        """
+        Generate individual tile spatial CN maps from processed h5ad files.
+        
+        Parameters:
+        -----------
+        k : int
+            Number of nearest neighbors used (for title)
+        n_clusters : int
+            Number of clusters used (for title)
+        cn_key : str
+            Key in adata.obs containing CN labels
+        coord_key : str
+            Key in adata.obsm containing spatial coordinates
+        palette : str
+            Color palette name
+        """
+        print(f"\n{'='*80}")
+        print("GENERATING INDIVIDUAL TILE SPATIAL MAPS")
+        print(f"{'='*80}")
+        
+        # Load all processed tiles
+        combined_adata = self.load_all_processed_tiles(cn_key)
+        
+        # Visualize individual tile maps
+        self.visualize_individual_tile_cns(
+            combined_adata,
+            cn_key=cn_key,
+            coord_key=coord_key,
+            palette=palette,
+            k=k,
+            n_clusters=n_clusters
+        )
+        
+        print(f"\n✓ Individual tile maps complete!")
+        print(f"  Results saved to: {self.base_output_dir}/individual_tiles/")
+    
     def analyze_group(
         self,
         group_name: str,
@@ -666,7 +1381,7 @@ class GroupCNAnalyzer:
         
         # Load overall composition for comparison
         print("\nLoading overall CN composition for comparison...")
-        overall_zscore = self.load_overall_composition()
+        overall_zscore = self.load_overall_composition(cn_key=cn_key)
         
         # Compute composition
         print("\nComputing CN composition...")
@@ -715,18 +1430,61 @@ class GroupCNAnalyzer:
         self,
         cn_key: str = 'cn_celltype',
         celltype_key: str = 'cell_type',
-        color_palette: str = 'tab20'
+        color_palette: str = 'tab20',
+        k: int = 20,
+        n_clusters: int = 7,
+        generate_unified: bool = True,
+        generate_individual: bool = True
     ):
-        """Run analysis for all groups."""
+        """
+        Run analysis for all groups and optionally generate unified analysis and individual tiles.
+        
+        Parameters:
+        -----------
+        cn_key : str
+            Key in adata.obs containing CN labels
+        celltype_key : str
+            Key in adata.obs containing cell type labels
+        color_palette : str
+            Color palette name
+        k : int
+            Number of nearest neighbors (for titles)
+        n_clusters : int
+            Number of clusters (for titles)
+        generate_unified : bool
+            Whether to generate unified analysis visualizations
+        generate_individual : bool
+            Whether to generate individual tile spatial maps
+        """
         banner = "=" * 80
         print(f"\n{banner}")
         print("GROUP-BASED CELLULAR NEIGHBORHOOD ANALYSIS")
         print(f"{banner}")
         print(f"Processed h5ad directory: {self.processed_h5ad_dir}")
         print(f"Categories JSON: {self.categories_json}")
-        print(f"Output directory: {self.output_dir}")
+        print(f"Base output directory: {self.base_output_dir}")
+        print(f"Group analysis output: {self.output_dir}")
         print(f"{banner}\n")
         
+        # Generate unified analysis and individual tiles first (if requested)
+        if generate_unified:
+            self.generate_unified_analysis(
+                k=k,
+                n_clusters=n_clusters,
+                cn_key=cn_key,
+                celltype_key=celltype_key,
+                color_palette=color_palette
+            )
+        
+        if generate_individual:
+            self.generate_individual_tiles(
+                k=k,
+                n_clusters=n_clusters,
+                cn_key=cn_key,
+                palette=color_palette
+            )
+        
+        # Run group-specific analysis
         groups = [key for key in self.categories.keys() if key != 'metadata']
         
         for group in groups:
@@ -744,15 +1502,20 @@ class GroupCNAnalyzer:
         )
         
         print(f"\n{banner}")
-        print("ALL GROUP ANALYSES COMPLETE!")
+        print("ALL ANALYSES COMPLETE!")
         print(f"{banner}")
-        print(f"\nResults saved to: {self.output_dir}/")
-        print(f"\nGenerated files for each group:")
-        print(f"  - cell_fraction_difference_{{group}}.png (heatmap with difference from overall)")
-        print(f"  - cn_cell_fraction_{{group}}.csv (composition data)")
-        print(f"  - neighborhood_frequency_{{group}}.png")
-        print(f"\nCombined figure for all groups:")
-        print(f"  - neighborhood_frequency_per_tile_all_groups.png (bars clustered by group)")
+        print(f"\nResults saved to: {self.base_output_dir}/")
+        print(f"\nUnified analysis (if generated):")
+        print(f"  - unified_analysis/unified_cn_composition_heatmap.png")
+        print(f"  - unified_analysis/neighborhood_frequency_overall.png")
+        print(f"  - unified_analysis/neighborhood_frequency_per_tile.png")
+        print(f"\nIndividual tiles (if generated):")
+        print(f"  - individual_tiles/spatial_cns_*.png")
+        print(f"\nGroup-specific analysis:")
+        print(f"  - {self.output_dir.name}/cell_fraction_difference_{{group}}.png")
+        print(f"  - {self.output_dir.name}/cn_cell_fraction_{{group}}.csv")
+        print(f"  - {self.output_dir.name}/neighborhood_frequency_{{group}}.png")
+        print(f"  - {self.output_dir.name}/neighborhood_frequency_per_tile_all_groups.png")
 
 
 def main():
@@ -764,7 +1527,7 @@ def main():
     )
     parser.add_argument(
         '--processed_h5ad_dir',
-        default='/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/cn_unified_results/all_n_cluster=7/processed_h5ad',
+        default='/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/cn_unified_results/all_n_cluster=9_sub/processed_h5ad',
         help='Directory containing processed h5ad files with CN annotations'
     )
     parser.add_argument(
@@ -780,7 +1543,7 @@ def main():
     parser.add_argument(
         '--cn_key',
         default='cn_celltype',
-        help='Column name for CN labels (default: cn_celltype)'
+        help='Column name for CN labels (default: cn_celltype). Use cn_celltype_sub for sub-clustered results.'
     )
     parser.add_argument(
         '--celltype_key',
@@ -797,8 +1560,50 @@ def main():
         default=None,
         help='Analyze specific group only (default: all groups)'
     )
+    parser.add_argument(
+        '--k',
+        type=int,
+        default=20,
+        help='Number of nearest neighbors used (for titles, default: 20)'
+    )
+    parser.add_argument(
+        '--n_clusters',
+        type=int,
+        default=None,
+        help='Number of clusters used (for titles, will try to infer from directory name if not provided)'
+    )
+    parser.add_argument(
+        '--no-generate_unified',
+        dest='generate_unified',
+        action='store_false',
+        default=True,
+        help='Skip unified analysis visualizations (default: generate unified analysis)'
+    )
+    parser.add_argument(
+        '--no-generate_individual',
+        dest='generate_individual',
+        action='store_false',
+        default=True,
+        help='Skip individual tile spatial maps (default: generate individual tiles)'
+    )
     
     args = parser.parse_args()
+
+    # Auto-detect cn_key for sub-clustered data: when processed_h5ad_dir contains "_sub",
+    # use cn_celltype_sub so we load sub-clustered CNs and find unified_cn_composition_sub.csv
+    if '_sub' in str(args.processed_h5ad_dir) and args.cn_key == 'cn_celltype':
+        args.cn_key = 'cn_celltype_sub'
+        print(f"Note: Detected sub-clustered data (_sub in path), using cn_key='cn_celltype_sub'")
+    
+    # Try to infer n_clusters from directory name if not provided
+    if args.n_clusters is None:
+        import re
+        dir_name = Path(args.processed_h5ad_dir).parent.name
+        match = re.search(r'n_cluster[=_]?(\d+)', dir_name)
+        if match:
+            args.n_clusters = int(match.group(1))
+        else:
+            args.n_clusters = 7  # Default
     
     # Initialize analyzer
     analyzer = GroupCNAnalyzer(
@@ -819,7 +1624,11 @@ def main():
         analyzer.analyze_all_groups(
             cn_key=args.cn_key,
             celltype_key=args.celltype_key,
-            color_palette=args.color_palette
+            color_palette=args.color_palette,
+            k=args.k,
+            n_clusters=args.n_clusters,
+            generate_unified=args.generate_unified,
+            generate_individual=args.generate_individual
         )
 
 

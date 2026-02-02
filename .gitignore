@@ -11,3 +11,7 @@ neighborhood_composition/spatial_contexts/cn_unified_results/processed_h5ad/JN_T
 /neighborhood_composition/spatial_contexts/cn_unified_results_groups
 quantitative_analysis/bray_curtis_dissimilarity.csv
 bray_curtis_dissimilarity.csv
+/quantitative_analysis/bray_curtis
+/quantitative_analysis/bray_curtis_case
+/quantitative_analysis/ctd_batch
+/quantitative_analysis/ctd_single

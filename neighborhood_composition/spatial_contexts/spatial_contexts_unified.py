@@ -9,9 +9,6 @@ Key Features:
 - Detects spatial contexts based on CN mixtures (k=40, threshold=0.9)
 - Generates spatial context maps and interaction graphs
 - Optimized for unified CN results
-
-Author: Generated with Claude Code
-Date: 2025-10-27
 """
 
 import numpy as np
