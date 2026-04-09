@@ -370,7 +370,15 @@ def plot_type_probability_distribution(results, output_path=None):
     stds = [results['type_prob_stats_by_type'][ct]['std'] for ct in cell_types]
     colors_list = [CELL_TYPE_COLORS.get(ct, "#808080") for ct in cell_types]
 
-    ax.bar(range(len(cell_types)), means, yerr=stds, color=colors_list,
+    # Extend y-axis when mean+std exceeds 1.05 so full error bars are visible
+    max_extent = max(m + s for m, s in zip(means, stds)) if means else 1.05
+    y_max = min(1.2, max(1.05, max_extent + 0.02))  # Room for full error bars, cap at 1.2
+    # Lower error: clip to not go below 0; upper error: use full std (axis extends to fit)
+    yerr_lower = [min(s, m) for m, s in zip(means, stds)]
+    yerr_upper = stds  # Full std dev - y_max extends to accommodate
+    yerr = [yerr_lower, yerr_upper]
+
+    ax.bar(range(len(cell_types)), means, yerr=yerr, color=colors_list,
            edgecolor='black', linewidth=1.5, capsize=5, alpha=0.8)
     ax.set_xlabel('Cell Type', fontsize=12, fontweight='bold')
     ax.set_ylabel('Type Probability', fontsize=12, fontweight='bold')
@@ -378,10 +386,13 @@ def plot_type_probability_distribution(results, output_path=None):
                  fontsize=14, fontweight='bold', pad=30)
     ax.set_xticks(range(len(cell_types)))
     ax.set_xticklabels(cell_names, rotation=45, ha='right', rotation_mode='anchor')
-    ax.set_ylim(0, 1.05)
+    ax.set_ylim(0, y_max)
     ax.grid(axis='y', alpha=0.3)
-    for i, (mean, std) in enumerate(zip(means, stds)):
-        ax.text(i, mean + std + 0.02, f'{mean:.3f}', ha='center', va='bottom', fontweight='bold', fontsize=9)
+    # Show mean at bottom of each bar (always visible, never clipped)
+    # White outline for readability on dark bar backgrounds
+    for i, mean in enumerate(means):
+        txt = ax.text(i, 0.02, f'{mean:.3f}', ha='center', va='bottom', fontweight='bold', fontsize=9)
+        txt.set_path_effects([patheffects.withStroke(linewidth=2, foreground='white')])
 
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     if output_path:
@@ -431,6 +442,129 @@ def export_results_to_csv(results, output_path, is_filtered=False):
                         'Cells_Per_Tile', 'Cells_Per_mm2',
                         'TypeProb_Min', 'TypeProb_Median', 'TypeProb_Mean', 'TypeProb_Max', 'TypeProb_Std']
     df = df[[c for c in column_order if c in df.columns]]
+    df.to_csv(output_path, index=False)
+    return df
+
+
+def extract_confidence_by_type(json_path, threshold=None):
+    """
+    Extract raw type probability (confidence) values for each cell type.
+
+    Args:
+        json_path (str or Path): Path to JSON file
+        threshold (float, optional): If set, apply confidence filter and group by filtered type.
+            Low-confidence cells are reclassified as Undefined (0).
+
+    Returns:
+        tuple: (filename, dict mapping cell_type -> list of confidence values)
+    """
+    with open(json_path, 'r') as f:
+        data = json.load(f)
+    nuclei = data.get('nuc', {})
+    filename = Path(json_path).name
+    if threshold is not None:
+        filename = f"{Path(json_path).stem}_threshold_{int(threshold*100)}.json"
+
+    probs_by_type = defaultdict(list)
+    for nucleus_id, nucleus_data in nuclei.items():
+        cell_type = nucleus_data.get('type', 0)
+        type_prob = nucleus_data.get('type_prob', 0)
+        if threshold is not None and type_prob < threshold and cell_type != 0:
+            cell_type = 0  # Reclassify as Undefined
+        probs_by_type[cell_type].append(type_prob)
+
+    return filename, dict(probs_by_type)
+
+
+def plot_confidence_distribution(probs_by_type, output_path, filename):
+    """
+    Create histogram showing confidence distribution (0-1) for each cell type.
+    Each subplot shows how confidence values are distributed for that cell type.
+    Layout: always 2 rows.
+
+    Args:
+        probs_by_type: dict mapping cell_type -> list of confidence values
+        output_path: Path to save the figure
+        filename: Source filename for title
+    """
+    if not probs_by_type:
+        return
+
+    cell_types = sorted(probs_by_type.keys())
+    n_types = len(cell_types)
+    n_rows = 2
+    n_cols = (n_types + n_rows - 1) // n_rows
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
+    if np.isscalar(axes) or (hasattr(axes, 'ndim') and axes.ndim == 1):
+        axes = np.array(axes).reshape(n_rows, n_cols)
+
+    bins = np.linspace(0, 1, 11)  # 10 bins: [0, 0.1, 0.2, ..., 1.0]
+
+    for idx, cell_type in enumerate(cell_types):
+        row, col = idx // n_cols, idx % n_cols
+        ax = axes[row, col]
+        probs = probs_by_type[cell_type]
+        type_name = CELL_TYPE_DICT.get(cell_type, f"Type {cell_type}")
+        color = CELL_TYPE_COLORS.get(cell_type, "#808080")
+
+        ax.hist(probs, bins=bins, color=color, edgecolor='black', alpha=0.8)
+        ax.set_xlim(0, 1)
+        ax.set_xlabel('Confidence (Type Probability)', fontsize=10)
+        ax.set_ylabel('Count', fontsize=10)
+        ax.set_title(f'{type_name}\n(n={len(probs)})', fontsize=11, fontweight='bold')
+        ax.grid(axis='y', alpha=0.3)
+
+    # Hide unused subplots
+    for idx in range(n_types, n_rows * n_cols):
+        row, col = idx // n_cols, idx % n_cols
+        axes[row, col].set_visible(False)
+
+    fig.suptitle(f'Confidence Distribution by Cell Type\n{filename}', fontsize=14, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def export_confidence_distribution_to_csv(probs_by_type, output_path, filename):
+    """
+    Export confidence distribution (binned 0-1) to CSV.
+
+    Args:
+        probs_by_type: dict mapping cell_type -> list of confidence values
+        output_path: Path to save CSV
+        filename: Source filename
+
+    Returns:
+        pd.DataFrame: Exported data
+    """
+    bins = np.linspace(0, 1, 11)  # [0, 0.1, 0.2, ..., 1.0]
+    bin_edges = list(zip(bins[:-1], bins[1:]))
+
+    data_rows = []
+    for cell_type in sorted(probs_by_type.keys()):
+        probs = np.array(probs_by_type[cell_type])
+        type_name = CELL_TYPE_DICT.get(cell_type, f"Type {cell_type}")
+        total = len(probs)
+
+        for bin_start, bin_end in bin_edges:
+            count = np.sum((probs >= bin_start) & (probs < bin_end))
+            if bin_end == 1.0:
+                count = np.sum((probs >= bin_start) & (probs <= bin_end))
+            proportion = count / total if total > 0 else 0
+            data_rows.append({
+                'Filename': filename,
+                'Cell_Type_ID': cell_type,
+                'Cell_Type_Name': type_name,
+                'Bin_Start': bin_start,
+                'Bin_End': bin_end,
+                'Bin_Label': f'{bin_start:.1f}-{bin_end:.1f}',
+                'Count': count,
+                'Proportion': proportion,
+                'Total_Cells': total
+            })
+
+    df = pd.DataFrame(data_rows)
     df.to_csv(output_path, index=False)
     return df
 
@@ -505,6 +639,21 @@ def main():
     print("   ✅ cell_type_distribution_filtered.png")
     print("   ✅ type_probability_by_cell_type_unfiltered.png")
     print("   ✅ type_probability_by_cell_type_filtered.png")
+
+    # Step 4b: Confidence distribution (0-1) by cell type (unfiltered and filtered)
+    filename, probs_by_type = extract_confidence_by_type(json_path)
+    if probs_by_type:
+        plot_confidence_distribution(probs_by_type, output_dir / "confidence_distribution_by_cell_type_unfiltered.png", filename)
+        export_confidence_distribution_to_csv(probs_by_type, output_dir / "confidence_distribution_by_cell_type_unfiltered.csv", filename)
+        print("   ✅ confidence_distribution_by_cell_type_unfiltered.png")
+        print("   ✅ confidence_distribution_by_cell_type_unfiltered.csv")
+
+    filename_filtered, probs_by_type_filtered = extract_confidence_by_type(json_path, threshold=CONFIDENCE_THRESHOLD)
+    if probs_by_type_filtered:
+        plot_confidence_distribution(probs_by_type_filtered, output_dir / f"confidence_distribution_by_cell_type_filtered_{int(CONFIDENCE_THRESHOLD*100)}.png", filename_filtered)
+        export_confidence_distribution_to_csv(probs_by_type_filtered, output_dir / f"confidence_distribution_by_cell_type_filtered_{int(CONFIDENCE_THRESHOLD*100)}.csv", filename_filtered)
+        print(f"   ✅ confidence_distribution_by_cell_type_filtered_{int(CONFIDENCE_THRESHOLD*100)}.png")
+        print(f"   ✅ confidence_distribution_by_cell_type_filtered_{int(CONFIDENCE_THRESHOLD*100)}.csv")
 
     # Step 5: Export CSV files
     threshold_str = str(int(CONFIDENCE_THRESHOLD * 100))

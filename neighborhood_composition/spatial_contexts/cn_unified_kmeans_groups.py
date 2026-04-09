@@ -1527,7 +1527,7 @@ def main():
     )
     parser.add_argument(
         '--processed_h5ad_dir',
-        default='/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/cn_unified_results/all_n_cluster=9_sub/processed_h5ad',
+        default='/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/cn_unified_results/all_n_cluster=13/processed_h5ad',
         help='Directory containing processed h5ad files with CN annotations'
     )
     parser.add_argument(

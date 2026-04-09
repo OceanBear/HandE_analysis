@@ -66,7 +66,7 @@ How balanced the sizes of the \(k\) CNs are (in terms of total cell counts). It 
 1. For each CN \(c \in \{1,\dots,k\}\), count the total number of cells assigned to that CN across all tiles:
 
 \[
-\text{size}_c = \#\{\text{cells assigned to CN } c\}
+\text{size}_c = \{\text{cells assigned to CN } c\}
 \]
 
 2. Form the size vector:

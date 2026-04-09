@@ -224,7 +224,7 @@ def main() -> int:
     parser.add_argument(
         "--n_clusters",
         type=int,
-        default=9,
+        default=6,
         help="Parent n_clusters (e.g. 5 for all_n_cluster=5).",
     )
     parser.add_argument(

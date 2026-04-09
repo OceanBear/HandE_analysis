@@ -9,15 +9,12 @@ folders like:
 It computes, for each k in a range (default 4..10), quantitative metrics that
 support selecting an "optimal" k balancing:
   - CN redundancy (CNs with very similar cell-type composition)
-  - Tile-group discrimination (CN frequencies differ across tile groups)
   - Cluster balance / interpretability
 
 Key ideas (from our discussion):
   1) Redundant CNs are detected via pairwise similarity of CN cell-type
      composition vectors (cosine similarity by default).
-  2) Tile/group discrimination is measured on the tile × CN frequency matrix
-     using silhouette score with Bray–Curtis distance.
-  3) If two CNs are composition-similar but used differently across tiles,
+  2) If two CNs are composition-similar but used differently across tiles,
      their per-tile frequency vectors will have low correlation (Spearman).
 
 Outputs:
@@ -33,14 +30,12 @@ Notes / dependencies:
 Example:
   python cn_select_optimal_k.py \
     --results_root "/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/cn_unified_results" \
-    --categories_json "tile_categories_88_tiles.json" \
     --out_dir "/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/cn_unified_results/k_selection"
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -66,25 +61,6 @@ def _import_h5ad_reader():
                 "Reading .h5ad requires `anndata` or `scanpy`.\n"
                 "Install one of them, e.g. `pip install anndata` (or `scanpy`)."
             ) from e
-
-
-def load_tile_categories(categories_json: Path) -> Dict[str, str]:
-    """
-    Load tile_categories_88_tiles.json and return tile_name -> group mapping.
-    Ignores the 'metadata' key if present.
-    """
-    with categories_json.open("r") as f:
-        data = json.load(f)
-
-    tile_to_group: Dict[str, str] = {}
-    for group, tiles in data.items():
-        if group == "metadata":
-            continue
-        if not isinstance(tiles, list):
-            continue
-        for t in tiles:
-            tile_to_group[str(t)] = str(group)
-    return tile_to_group
 
 
 def _safe_to_int(x) -> Optional[int]:
@@ -124,7 +100,6 @@ class KMetrics:
     n_tiles: int
     n_cells: int
     n_celltypes: int
-    silhouette_braycurtis: float
     cn_size_cv: float
     max_cn_cosine_similarity: float
     mean_cn_cosine_similarity: float
@@ -138,7 +113,6 @@ class KMetrics:
 def analyze_k(
     k: int,
     results_root: Path,
-    tile_to_group: Dict[str, str],
     *,
     cn_key: str,
     celltype_key: str,
@@ -148,7 +122,6 @@ def analyze_k(
     usage_corr_high: float,
     save_matrices: bool,
     out_dir: Path,
-    exclude_groups: Optional[List[str]] = None,
 ) -> Tuple[KMetrics, pd.DataFrame]:
     """
     Analyze a single k folder.
@@ -236,51 +209,6 @@ def analyze_k(
     tile_cn.columns = [f"CN_{i}" for i in range(1, k + 1)]
     tile_cn_freq = _normalize_rows(tile_cn)
 
-    # Group labels aligned to tiles
-    groups = []
-    missing_group = []
-    for t in tile_cn_freq.index:
-        g = tile_to_group.get(t)
-        if g is None:
-            missing_group.append(t)
-            g = "unknown"
-        groups.append(g)
-    if missing_group:
-        # Keep going, but make it very obvious in outputs via "unknown" group.
-        # (Common cause: tile naming mismatch between filenames and JSON.)
-        pass
-    group_labels = np.array(groups)
-
-    # Silhouette score using Bray–Curtis distance on tile CN frequency vectors
-    # Optionally exclude certain groups from silhouette calculation
-    silhouette = float("nan")
-    try:
-        from scipy.spatial.distance import pdist, squareform
-        from sklearn.metrics import silhouette_score
-
-        # Filter tiles if exclude_groups is specified
-        if exclude_groups is None:
-            exclude_groups = []
-        
-        # Create mask for tiles to include (exclude tiles from specified groups)
-        include_mask = np.array([g not in exclude_groups for g in groups])
-        
-        if include_mask.sum() < 3:
-            # Not enough tiles after filtering
-            silhouette = float("nan")
-        else:
-            # Filter tile × CN frequency matrix and group labels
-            tile_cn_freq_filtered = tile_cn_freq.iloc[include_mask]
-            group_labels_filtered = group_labels[include_mask]
-            
-            X = tile_cn_freq_filtered.to_numpy(dtype=float)
-            D = squareform(pdist(X, metric="braycurtis"))
-            # Silhouette requires at least 2 groups and at least 2 samples in total
-            if len(np.unique(group_labels_filtered)) >= 2 and X.shape[0] >= 3:
-                silhouette = float(silhouette_score(D, group_labels_filtered, metric="precomputed"))
-    except Exception:
-        silhouette = float("nan")
-
     # CN celltype composition matrix (rows sum to 1)
     if cn_celltype_counts is None:
         raise RuntimeError("Unexpected: no CN×celltype counts were accumulated.")
@@ -342,7 +270,6 @@ def analyze_k(
         n_tiles=int(tile_cn_freq.shape[0]),
         n_cells=int(total_cells),
         n_celltypes=int(len(celltype_set)),
-        silhouette_braycurtis=float(silhouette),
         cn_size_cv=float(cn_size_cv),
         max_cn_cosine_similarity=float(max_sim),
         mean_cn_cosine_similarity=float(mean_sim),
@@ -370,13 +297,7 @@ def main() -> int:
         "--k_min", type=int, default=4, help="Minimum k to evaluate (inclusive)."
     )
     p.add_argument(
-        "--k_max", type=int, default=10, help="Maximum k to evaluate (inclusive)."
-    )
-    p.add_argument(
-        "--categories_json",
-        type=str,
-        default="tile_categories_88_tiles.json",
-        help="Tile category JSON path (relative paths resolved from this script directory).",
+        "--k_max", type=int, default=13, help="Maximum k to evaluate (inclusive)."
     )
     p.add_argument("--cn_key", type=str, default="cn_celltype", help="CN label column in adata.obs.")
     p.add_argument("--celltype_key", type=str, default="cell_type", help="Cell type column in adata.obs.")
@@ -420,28 +341,12 @@ def main() -> int:
         action="store_true",
         help="Make a few summary plots (requires matplotlib).",
     )
-    p.add_argument(
-        "--exclude_groups",
-        nargs="+",
-        default=[],  # default=["tumour_scar", "tumour_lep"]
-        help="Tile groups to exclude from silhouette calculation (default: tumour_scar tumour_lep). "
-             "Use '--exclude_groups' with no arguments to exclude none.",
-    )
 
     args = p.parse_args()
-    
-    # Handle case where user wants to exclude no groups (empty list)
-    exclude_groups = args.exclude_groups if args.exclude_groups else []
 
     results_root = Path(args.results_root)
-    categories_json = Path(args.categories_json)
-    if not categories_json.is_absolute():
-        categories_json = (script_dir / categories_json).resolve()
-
     out_dir = Path(args.out_dir) if args.out_dir else (results_root / "k_selection")
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    tile_to_group = load_tile_categories(categories_json)
 
     rows: List[KMetrics] = []
     all_pairs_long: List[pd.DataFrame] = []
@@ -450,7 +355,6 @@ def main() -> int:
             m, sim_mat_df = analyze_k(
                 k=k,
                 results_root=results_root,
-                tile_to_group=tile_to_group,
                 cn_key=args.cn_key,
                 celltype_key=args.celltype_key,
                 tile_key=args.tile_key,
@@ -459,7 +363,6 @@ def main() -> int:
                 usage_corr_high=args.usage_corr_high,
                 save_matrices=bool(args.save_matrices),
                 out_dir=out_dir,
-                exclude_groups=exclude_groups,
             )
             rows.append(m)
             # Save per-k CN cosine similarity matrix (X/Y axes are CN numbers)
@@ -482,7 +385,7 @@ def main() -> int:
                     )
             all_pairs_long.append(pd.DataFrame(pairs_rows))
 
-            print(f"✓ k={k}: silhouette={m.silhouette_braycurtis:.3f}, max_sim={m.max_cn_cosine_similarity:.3f}")
+            print(f"✓ k={k}: max_sim={m.max_cn_cosine_similarity:.3f}")
         except Exception as e:
             print(f"✗ k={k}: {e}")
 
@@ -514,21 +417,13 @@ def main() -> int:
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
 
-            # Plot: silhouette vs k and max similarity vs k
-            fig, ax1 = plt.subplots(figsize=(8, 4.5))
-            ax1.plot(df["k"], df["silhouette_braycurtis"], marker="o", label="Silhouette (Bray–Curtis)")
-            ax1.set_xlabel("k (n_clusters)")
-            ax1.set_ylabel("Silhouette (group separation)")
-            ax1.grid(alpha=0.3, linestyle="--")
-
-            ax2 = ax1.twinx()
-            ax2.plot(df["k"], df["max_cn_cosine_similarity"], marker="s", color="tab:red", label="Max CN cosine similarity")
-            ax2.set_ylabel("Max CN cosine similarity (redundancy)")
-
-            # Combined legend
-            lines, labels = ax1.get_legend_handles_labels()
-            lines2, labels2 = ax2.get_legend_handles_labels()
-            ax1.legend(lines + lines2, labels + labels2, loc="best")
+            # Plot: max CN cosine similarity vs k
+            fig, ax = plt.subplots(figsize=(8, 4.5))
+            ax.plot(df["k"], df["max_cn_cosine_similarity"], marker="s", color="tab:red", label="Max CN cosine similarity")
+            ax.set_xlabel("k (n_clusters)")
+            ax.set_ylabel("Max CN cosine similarity (redundancy)")
+            ax.grid(alpha=0.3, linestyle="--")
+            ax.legend(loc="best")
 
             plt.tight_layout()
             plot_path = out_dir / "k_selection_summary.png"
