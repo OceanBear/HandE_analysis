@@ -15,3 +15,4 @@ bray_curtis_dissimilarity.csv
 /quantitative_analysis/bray_curtis_case
 /quantitative_analysis/ctd_batch
 /quantitative_analysis/ctd_single
+/neighborhood_composition/cell_type_interaction/cti_multiple_tiles

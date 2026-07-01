@@ -87,9 +87,83 @@ def build_spatial_graph(adata, method='radius', radius=50, n_neighbors=20, coord
     return adata
 
 
-def neighborhood_enrichment_analysis(adata, cluster_key='cell_type', n_perms=1000, seed=42):
+def _extract_nhood_enrichment_pvalues(adata, cluster_key: str):
+    """Return p-value matrix from Squidpy uns if present (API varies by version), else None."""
+    key = f"{cluster_key}_nhood_enrichment"
+    if key not in adata.uns:
+        return None
+    d = adata.uns[key]
+    if not isinstance(d, dict):
+        return None
+    for pk in ("pvalues", "pvalue", "pvals", "pvalues_adj", "p_adj"):
+        if pk not in d:
+            continue
+        p = d[pk]
+        if isinstance(p, pd.DataFrame):
+            return p.values.astype(float)
+        return np.asarray(p, dtype=float)
+    return None
+
+
+def compute_sigval_matrix(
+    z,
+    *,
+    p_values=None,
+    method: str = "p_from_z",
+    alpha: float = 0.05,
+    z_threshold: float = 2.0,
+    zero_diagonal: bool = True,
+) -> np.ndarray:
     """
-    Perform neighborhood enrichment analysis to identify cell type interactions.
+    Schapiro-style signed significance in {-1, 0, +1} per cell-type pair.
+
+    +1: interaction (enrichment vs null), -1: avoidance (depletion), 0: not significant.
+    When Squidpy stores empirical p-values in ``adata.uns``, pass ``p_values``; otherwise
+    ``p_from_z`` uses a two-sided normal approximation p = 2*Phi(-|z|) (not identical to
+    imcRtools permutation p-values but similar use). ``z_threshold`` applies if
+    ``method == 'z_threshold'``.
+
+    Non-finite z (missing pairs after alignment) -> 0.
+    """
+    z = np.asarray(z, dtype=float)
+    sig = np.zeros(z.shape, dtype=np.int8)
+    finite = np.isfinite(z)
+
+    if p_values is not None and np.shape(p_values) == z.shape:
+        p = np.asarray(p_values, dtype=float)
+        hit = finite & np.isfinite(p) & (p <= alpha)
+        sig = np.where(hit & (z > 0), 1, sig)
+        sig = np.where(hit & (z < 0), -1, sig)
+    elif method == "z_threshold":
+        hit = finite & (np.abs(z) >= z_threshold)
+        sig = np.where(hit & (z > 0), 1, sig)
+        sig = np.where(hit & (z < 0), -1, sig)
+    elif method == "p_from_z":
+        try:
+            from scipy.stats import norm
+        except ImportError as e:
+            raise ImportError(
+                "compute_sigval_matrix(method='p_from_z') requires scipy "
+                "(install scipy or use method='z_threshold')."
+            ) from e
+        p = 2.0 * norm.sf(np.abs(z))
+        hit = finite & np.isfinite(p) & (p <= alpha)
+        sig = np.where(hit & (z > 0), 1, sig)
+        sig = np.where(hit & (z < 0), -1, sig)
+    else:
+        raise ValueError(f"Unknown sigval method: {method!r}")
+
+    if zero_diagonal and sig.shape[0] == sig.shape[1]:
+        np.fill_diagonal(sig, 0)
+    return sig
+
+
+def cell_type_interaction_analysis(adata, cluster_key='cell_type', n_perms=1000, seed=42):
+    """
+    Compute cell type interaction (CTI) scores via Squidpy neighborhood enrichment.
+
+    Wraps ``squidpy.gr.nhood_enrichment``; results are stored under the library key
+    ``adata.uns['{cluster_key}_nhood_enrichment']`` (unchanged for AnnData compatibility).
 
     Parameters:
     -----------
@@ -105,14 +179,13 @@ def neighborhood_enrichment_analysis(adata, cluster_key='cell_type', n_perms=100
     Returns:
     --------
     adata : AnnData
-        Modified in place with enrichment results
+        Modified in place with CTI (nhood enrichment) results in ``adata.uns``
     """
 
-    print(f"\nPerforming neighborhood enrichment analysis...")
+    print(f"\nComputing cell type interaction (CTI) analysis...")
     print(f"  - Cluster key: {cluster_key}")
     print(f"  - Number of permutations: {n_perms}")
 
-    # Compute neighborhood enrichment
     sq.gr.nhood_enrichment(
         adata,
         cluster_key=cluster_key,
@@ -120,8 +193,8 @@ def neighborhood_enrichment_analysis(adata, cluster_key='cell_type', n_perms=100
         seed=seed
     )
 
-    print(f"  - Enrichment analysis complete!")
-    print(f"  - Results stored in adata.uns['{cluster_key}_nhood_enrichment']")
+    print(f"  - CTI analysis complete!")
+    print(f"  - Results stored in adata.uns['{cluster_key}_nhood_enrichment'] (Squidpy)")
 
     return adata
 
@@ -191,14 +264,17 @@ def compute_centrality_scores(adata, cluster_key='cell_type'):
     return adata
 
 
-def visualize_enrichment(adata, cluster_key='cell_type', figsize=(10, 8), save_path=None, radius=None, n_neighbors=None, n_perms=None):
+def visualize_cell_type_interaction(adata, cluster_key='cell_type', figsize=(10, 8), save_path=None, radius=None, n_neighbors=None, n_perms=None):
     """
-    Visualize neighborhood enrichment as a heatmap.
+    Visualize cell type interaction (CTI) as a heatmap of Squidpy permutation z-scores.
+
+    One tile / one ``AnnData``: shows the **raw** z matrix from ``nhood_enrichment`` for that
+    object (not averaged across images). Colorbar label: ``Z-score`` (permutation-null scale).
 
     Parameters:
     -----------
     adata : AnnData
-        AnnData object with enrichment results
+        AnnData object with CTI (nhood enrichment) results
     cluster_key : str, default='cell_type'
         Key for cell type labels
     figsize : tuple, default=(10, 8)
@@ -213,7 +289,7 @@ def visualize_enrichment(adata, cluster_key='cell_type', figsize=(10, 8), save_p
         Number of permutations used (displayed in title)
     """
 
-    print(f"\nVisualizing neighborhood enrichment...")
+    print(f"\nVisualizing cell type interaction (CTI) heatmap...")
 
     # Get z-scores to calculate dynamic scale
     zscore = adata.uns[f'{cluster_key}_nhood_enrichment']['zscore']
@@ -252,11 +328,11 @@ def visualize_enrichment(adata, cluster_key='cell_type', figsize=(10, 8), save_p
         square=True,
         ax=ax
     )
-    ax.set_xlabel('Cell Type', fontsize=12)
-    ax.set_ylabel('Cell Type', fontsize=12)
+    ax.set_xlabel('Cell Type', fontsize=20)
+    ax.set_ylabel('Cell Type', fontsize=20)
 
-    # Build title with optional radius/knn and n_perms
-    title = 'Neighborhood Enrichment Analysis\n(Mean Z-score)'
+    # Build title with optional radius/knn and n_perms (single-tile matrix, not averaged)
+    title = 'Cell Type Interaction (CTI)\n(Permutation z, this tile)'
     if radius is not None or n_neighbors is not None or n_perms is not None:
         params = []
         if radius is not None:
@@ -270,7 +346,7 @@ def visualize_enrichment(adata, cluster_key='cell_type', figsize=(10, 8), save_p
     ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
 
     # Set tick labels
-    ax.set_xticklabels(cell_types, rotation=45, ha='right')
+    ax.set_xticklabels(cell_types, rotation=0) # ha='right
     ax.set_yticklabels(cell_types, rotation=0)
 
     plt.tight_layout()
@@ -346,7 +422,7 @@ def visualize_spatial_distribution(adata, cluster_key='cell_type', figsize=(12, 
     text_str = f"Displaying {adata.n_obs:,} cells"
     ax.text(0.98, 0.02, text_str,
             transform=ax.transAxes,
-            fontsize=10,
+            fontsize=20,
             verticalalignment='bottom',
             horizontalalignment='right',
             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
@@ -369,7 +445,7 @@ def summarize_interactions(adata, cluster_key='cell_type', threshold=2.0):
     Parameters:
     -----------
     adata : AnnData
-        AnnData object with enrichment results
+        AnnData object with CTI (nhood enrichment) z-scores
     cluster_key : str, default='cell_type'
         Key for cell type labels
     threshold : float, default=2.0
@@ -383,7 +459,6 @@ def summarize_interactions(adata, cluster_key='cell_type', threshold=2.0):
 
     print(f"\nSummarizing cell-cell interactions (threshold: |z| > {threshold})...")
 
-    # Get enrichment z-scores
     zscore = adata.uns[f'{cluster_key}_nhood_enrichment']['zscore']
 
     # Get cell type names from the categorical data
@@ -423,23 +498,37 @@ def summarize_interactions(adata, cluster_key='cell_type', threshold=2.0):
     return interactions_df
 
 
-def save_intermediate_results(adata, output_dir, tile_name=None, cluster_key='cell_type'):
+def save_intermediate_results(
+    adata,
+    output_dir,
+    tile_name=None,
+    cluster_key='cell_type',
+    *,
+    sigval_method='p_from_z',
+    sigval_alpha=0.05,
+    sigval_z_threshold=2.0,
+):
     """
     Save intermediate results for efficient aggregation later.
 
-    This saves zscore matrix and metadata to disk, avoiding the need to keep
-    large AnnData objects in memory during batch processing.
+    Saves z-score matrix, Schapiro-style ``sigval`` in {-1, 0, +1}, and metadata.
 
     Parameters:
     -----------
     adata : AnnData
-        AnnData object with enrichment results
+        AnnData object with CTI (nhood enrichment) results
     output_dir : str or Path
         Directory to save intermediate results
     tile_name : str, optional
         Name of the tile (for prefixing files). If None, no prefix used.
     cluster_key : str, default='cell_type'
         Key for cell type labels
+    sigval_method : str, default='p_from_z'
+        ``p_from_z`` (two-sided normal p from Squidpy z) or ``z_threshold``.
+    sigval_alpha : float, default=0.05
+        Significance level for p-value rules.
+    sigval_z_threshold : float, default=2.0
+        Minimum |z| when ``sigval_method == 'z_threshold'``.
 
     Returns:
     --------
@@ -454,12 +543,21 @@ def save_intermediate_results(adata, output_dir, tile_name=None, cluster_key='ce
     # Get prefix for files
     prefix = f'{tile_name}_' if tile_name else ''
 
-    # Extract enrichment results
+    # Extract CTI (nhood enrichment) z-scores for aggregation
     zscore = adata.uns[f'{cluster_key}_nhood_enrichment']['zscore']
     if isinstance(zscore, pd.DataFrame):
         zscore_array = zscore.values
     else:
         zscore_array = np.array(zscore)
+
+    p_arr = _extract_nhood_enrichment_pvalues(adata, cluster_key)
+    sigval_array = compute_sigval_matrix(
+        zscore_array,
+        p_values=p_arr,
+        method=sigval_method,
+        alpha=sigval_alpha,
+        z_threshold=sigval_z_threshold,
+    )
 
     # Get cell types
     cell_types = adata.obs[cluster_key].cat.categories.tolist()
@@ -468,15 +566,22 @@ def save_intermediate_results(adata, output_dir, tile_name=None, cluster_key='ce
     zscore_path = output_dir / f'{prefix}zscore.npy'
     np.save(zscore_path, zscore_array)
 
+    sigval_path = output_dir / f'{prefix}sigval.npy'
+    np.save(sigval_path, sigval_array)
+
     # Save metadata as JSON
     metadata = {
         'tile_name': tile_name,
         'n_cells': int(adata.n_obs),
         'cell_types': cell_types,
         'cluster_key': cluster_key,
-        'zscore_shape': zscore_array.shape,
+        'zscore_shape': list(zscore_array.shape),
         'mean_abs_zscore': float(np.abs(zscore_array).mean()),
-        'max_abs_zscore': float(np.abs(zscore_array).max())
+        'max_abs_zscore': float(np.abs(zscore_array).max()),
+        'sigval_method': sigval_method,
+        'sigval_alpha': float(sigval_alpha),
+        'sigval_z_threshold': float(sigval_z_threshold),
+        'used_squidpy_pvalues': p_arr is not None,
     }
 
     metadata_path = output_dir / f'{prefix}metadata.json'
@@ -485,12 +590,15 @@ def save_intermediate_results(adata, output_dir, tile_name=None, cluster_key='ce
 
     print(f"  - Saved intermediate results:")
     print(f"    • {zscore_path.name}")
+    print(f"    • {sigval_path.name}")
     print(f"    • {metadata_path.name}")
 
     return {
         'zscore_path': zscore_path,
+        'sigval_path': sigval_path,
         'metadata_path': metadata_path,
         'zscore': zscore_array,
+        'sigval': sigval_array,
         'metadata': metadata
     }
 
@@ -509,7 +617,7 @@ def load_intermediate_results(output_dir, tile_name=None):
     Returns:
     --------
     results : dict
-        Dictionary containing zscore array and metadata
+        Dictionary containing zscore array, optional sigval (-1/0/1), and metadata
     """
     import json
 
@@ -530,8 +638,21 @@ def load_intermediate_results(output_dir, tile_name=None):
     with open(metadata_path, 'r') as f:
         metadata = json.load(f)
 
+    sigval_path = output_dir / f'{prefix}sigval.npy'
+    if sigval_path.exists():
+        sigval = np.load(sigval_path)
+    else:
+        sigval = compute_sigval_matrix(
+            zscore,
+            p_values=None,
+            method=metadata.get('sigval_method', 'p_from_z'),
+            alpha=float(metadata.get('sigval_alpha', 0.05)),
+            z_threshold=float(metadata.get('sigval_z_threshold', 2.0)),
+        )
+
     return {
         'zscore': zscore,
+        'sigval': sigval,
         'metadata': metadata,
         'cell_types': metadata['cell_types'],
         'n_cells': metadata['n_cells'],
@@ -539,7 +660,23 @@ def load_intermediate_results(output_dir, tile_name=None):
     }
 
 
-def aggregate_from_saved_results(tile_dirs, output_dir, tile_names=None, n_perms=None, n_neighbors=None):
+def aggregate_from_saved_results(
+    tile_dirs,
+    output_dir,
+    tile_names=None,
+    n_perms=None,
+    n_neighbors=None,
+    *,
+    merge_epithelium_to_tumor=True,
+    tumor_label="Tumor",
+    cti_heatmap_annot_fontsize=32,
+    use_short_cell_type_labels_in_plots=True,
+    cell_type_abbrev_map=None,
+    schapiro_sum_sigval=True,
+    sigval_method="p_from_z",
+    sigval_alpha=0.05,
+    sigval_z_threshold=2.0,
+):
     """
     Aggregate results from multiple tiles using saved intermediate files.
 
@@ -555,9 +692,28 @@ def aggregate_from_saved_results(tile_dirs, output_dir, tile_names=None, n_perms
     tile_names : list of str, optional
         List of tile names corresponding to tile_dirs. If None, extracts from metadata.
     n_perms : int, optional
-        Number of permutations used in analysis (for display in plot title)
+        Number of permutations used in CTI analysis (for display in plot title)
     n_neighbors : int, optional
         Number of neighbors used in spatial graph (for display in plot title)
+    merge_epithelium_to_tumor : bool, default=True
+        Merge the two default epithelium cell types into ``tumor_label`` per tile before alignment.
+    tumor_label : str, default='Tumor'
+        Label for merged epithelium block.
+    cti_heatmap_annot_fontsize : float, default=12
+        Font size for annotated z-scores inside aggregated mean / std heatmaps.
+    use_short_cell_type_labels_in_plots : bool, default=True
+        Short axis labels from ``cti_aggregate.DEFAULT_CELL_TYPE_DISPLAY_ABBREV``.
+    cell_type_abbrev_map : dict optional
+        Override full-name → short label mapping for heatmap ticks only.
+    schapiro_sum_sigval : bool, default=True
+        If True, sum Schapiro-style ``sigval`` in {-1,0,1} per tile (from aligned z-scores)
+        and save ``aggregated_summed_sigval.csv`` / ``aggregated_summed_sigval.png``.
+    sigval_method : str, default='p_from_z'
+        Passed to ``compute_sigval_matrix`` for each aligned tile (see that docstring).
+    sigval_alpha : float, default=0.05
+        Significance level for ``sigval`` when using p-values / ``p_from_z``.
+    sigval_z_threshold : float, default=2.0
+        |z| threshold when ``sigval_method == 'z_threshold'``.
 
     Returns:
     --------
@@ -584,12 +740,26 @@ def aggregate_from_saved_results(tile_dirs, output_dir, tile_names=None, n_perms
 
         try:
             results = load_intermediate_results(tile_dir, tile_name=tile_name)
-            zscores_list.append(results['zscore'])
-            metadata_list.append(results['metadata'])
+            zscore = results["zscore"]
+            metadata = dict(results["metadata"])
+            tile_cell_types = metadata["cell_types"]
+
+            if merge_epithelium_to_tumor:
+                from cti_aggregate import merge_symmetric_celltype_zscore_df
+
+                zscore_df = pd.DataFrame(zscore, index=tile_cell_types, columns=tile_cell_types)
+                zscore_df = merge_symmetric_celltype_zscore_df(
+                    zscore_df, new_label=tumor_label
+                )
+                zscore = zscore_df.values
+                metadata["cell_types"] = list(zscore_df.index)
+                tile_cell_types = metadata["cell_types"]
+
+            zscores_list.append(zscore)
+            metadata_list.append(metadata)
             actual_tile_names.append(results['tile_name'] or tile_dir.name)
-            
+
             # Collect all unique cell types across all tiles
-            tile_cell_types = results['metadata']['cell_types']
             all_cell_types_set.update(tile_cell_types)
 
             print(f"  [{i+1}/{len(tile_dirs)}] Loaded: {results['tile_name'] or tile_dir.name} "
@@ -620,6 +790,7 @@ def aggregate_from_saved_results(tile_dirs, output_dir, tile_names=None, n_perms
     
     # Second pass: align each tile's z-score matrix to common cell type set
     aligned_zscores_list = []
+    aligned_sig_list = []
     for i, (zscore, metadata) in enumerate(zip(zscores_list, metadata_list)):
         tile_cell_types = metadata['cell_types']
         tile_name = actual_tile_names[i]
@@ -634,6 +805,16 @@ def aggregate_from_saved_results(tile_dirs, output_dir, tile_names=None, n_perms
         aligned_zscore_array = aligned_zscore_df.values
         
         aligned_zscores_list.append(aligned_zscore_array)
+
+        if schapiro_sum_sigval:
+            sig_tile = compute_sigval_matrix(
+                aligned_zscore_array,
+                p_values=None,
+                method=sigval_method,
+                alpha=sigval_alpha,
+                z_threshold=sigval_z_threshold,
+            )
+            aligned_sig_list.append(sig_tile)
         
         missing_types = set(common_cell_types) - set(tile_cell_types)
         if missing_types:
@@ -683,7 +864,27 @@ def aggregate_from_saved_results(tile_dirs, output_dir, tile_names=None, n_perms
     median_df = pd.DataFrame(median_zscore, index=cell_types, columns=cell_types)
     median_df.to_csv(output_dir / 'aggregated_median_zscore.csv')
 
-    # Visualize mean enrichment
+    sum_sigval = None
+    if schapiro_sum_sigval:
+        if len(aligned_sig_list) != n_tiles:
+            print("  [!] Warning: schapiro_sum_sigval skipped (sig list length mismatch)")
+        else:
+            sig_stack = np.stack(aligned_sig_list, axis=0).astype(np.int64)
+            sum_sigval = np.sum(sig_stack, axis=0)
+            sum_sig_df = pd.DataFrame(sum_sigval, index=cell_types, columns=cell_types)
+            sum_sig_df.to_csv(output_dir / 'aggregated_summed_sigval.csv')
+
+    from cti_aggregate import cell_types_display_labels
+
+    plot_tick_labels = cell_types_display_labels(
+        cell_types,
+        abbrev_map=cell_type_abbrev_map,
+        enabled=use_short_cell_type_labels_in_plots,
+    )
+    heatmap_annot_kws = {"size": cti_heatmap_annot_fontsize}
+    tick_label_fs = cti_heatmap_annot_fontsize
+
+    # Visualize mean CTI (mean z-score across tiles)
     fig, ax = plt.subplots(figsize=(10, 8))
     max_abs_value = max(abs(mean_zscore.min()), abs(mean_zscore.max()))
 
@@ -693,13 +894,12 @@ def aggregate_from_saved_results(tile_dirs, output_dir, tile_names=None, n_perms
         center=0,
         vmin=-np.ceil(max_abs_value),
         vmax=np.ceil(max_abs_value),
-        annot=True,
-        fmt='.2f',
+        annot=False,
         cbar_kws={'label': 'Mean Z-score'},
         linewidths=0.5,
         linecolor='white',
-        xticklabels=cell_types,
-        yticklabels=cell_types,
+        xticklabels=plot_tick_labels,
+        yticklabels=plot_tick_labels,
         square=True,
         ax=ax
     )
@@ -707,7 +907,7 @@ def aggregate_from_saved_results(tile_dirs, output_dir, tile_names=None, n_perms
     ax.set_ylabel('Cell Type', fontsize=12)
     
     # Build title with parameters if provided
-    title_parts = [f'Aggregated Neighborhood Enrichment']
+    title_parts = [f'Aggregated Cell Type Interaction (CTI)']
     title_parts.append(f'(Mean Z-score across {n_tiles} tiles)')
     if n_perms is not None:
         title_parts.append(f'n_perms={n_perms}')
@@ -716,10 +916,10 @@ def aggregate_from_saved_results(tile_dirs, output_dir, tile_names=None, n_perms
     title = '\n'.join(title_parts)
     
     ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
-    plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
-    plt.setp(ax.get_yticklabels(), rotation=0)
+    plt.setp(ax.get_xticklabels(), rotation=0, fontsize=tick_label_fs) # ha='right
+    plt.setp(ax.get_yticklabels(), rotation=0, fontsize=tick_label_fs)
     plt.tight_layout()
-    plt.savefig(output_dir / 'aggregated_mean_enrichment.png', dpi=300, bbox_inches='tight')
+    plt.savefig(output_dir / 'aggregated_mean_cti.png', dpi=300, bbox_inches='tight')
     plt.close()
 
     # Visualize variability
@@ -733,11 +933,12 @@ def aggregate_from_saved_results(tile_dirs, output_dir, tile_names=None, n_perms
         vmax=np.ceil(max_std),
         annot=True,
         fmt='.2f',
+        annot_kws=heatmap_annot_kws,
         cbar_kws={'label': 'Standard Deviation'},
         linewidths=0.5,
         linecolor='white',
-        xticklabels=cell_types,
-        yticklabels=cell_types,
+        xticklabels=plot_tick_labels,
+        yticklabels=plot_tick_labels,
         square=True,
         ax=ax
     )
@@ -754,17 +955,58 @@ def aggregate_from_saved_results(tile_dirs, output_dir, tile_names=None, n_perms
     title = '\n'.join(title_parts)
     
     ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
-    plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
-    plt.setp(ax.get_yticklabels(), rotation=0)
+    plt.setp(ax.get_xticklabels(), rotation=0, fontsize=tick_label_fs) # ha='right
+    plt.setp(ax.get_yticklabels(), rotation=0, fontsize=tick_label_fs)
     plt.tight_layout()
     plt.savefig(output_dir / 'aggregated_variability.png', dpi=300, bbox_inches='tight')
     plt.close()
 
+    if sum_sigval is not None:
+        vmax = float(n_tiles)
+        fig, ax = plt.subplots(figsize=(10, 8))
+        sns.heatmap(
+            sum_sigval.astype(float),
+            cmap='coolwarm',
+            center=0,
+            vmin=-vmax,
+            vmax=vmax,
+            annot=True,
+            fmt='.0f',
+            annot_kws=heatmap_annot_kws,
+            cbar_kws={'label': 'Summed sigval'},
+            linewidths=0.5,
+            linecolor='white',
+            xticklabels=plot_tick_labels,
+            yticklabels=plot_tick_labels,
+            square=True,
+            ax=ax,
+        )
+        ax.set_xlabel('Cell Type', fontsize=12)
+        ax.set_ylabel('Cell Type', fontsize=12)
+        sig_title = (
+            f'Schapiro-style summed significance (sigval)\n'
+            f'+1 interaction, −1 avoidance, 0 not significant; sum over {n_tiles} tiles\n'
+            f'(rule: {sigval_method}, α={sigval_alpha}'
+        )
+        if sigval_method == 'z_threshold':
+            sig_title += f', |z|≥{sigval_z_threshold})'
+        else:
+            sig_title += ')'
+        ax.set_title(sig_title, fontsize=12, fontweight='bold', pad=16)
+        plt.setp(ax.get_xticklabels(), rotation=45, ha='right', fontsize=tick_label_fs)
+        plt.setp(ax.get_yticklabels(), rotation=0, fontsize=tick_label_fs)
+        plt.tight_layout()
+        plt.savefig(output_dir / 'aggregated_summed_sigval.png', dpi=300, bbox_inches='tight')
+        plt.close()
+
     print(f"  - Saved aggregated_mean_zscore.csv")
     print(f"  - Saved aggregated_std_zscore.csv")
     print(f"  - Saved aggregated_median_zscore.csv")
-    print(f"  - Saved aggregated_mean_enrichment.png")
+    print(f"  - Saved aggregated_mean_cti.png")
     print(f"  - Saved aggregated_variability.png")
+    if sum_sigval is not None:
+        print(f"  - Saved aggregated_summed_sigval.csv")
+        print(f"  - Saved aggregated_summed_sigval.png")
 
     aggregated = {
         'mean_zscore': mean_zscore,
@@ -772,6 +1014,7 @@ def aggregate_from_saved_results(tile_dirs, output_dir, tile_names=None, n_perms
         'median_zscore': median_zscore,
         'min_zscore': min_zscore,
         'max_zscore': max_zscore,
+        'sum_sigval': sum_sigval,
         'cell_types': cell_types,
         'n_tiles': n_tiles,
         'tile_names': actual_tile_names,
@@ -801,7 +1044,7 @@ def run_spatial_analysis_pipeline(adata_path, output_dir='spatial_analysis_resul
     radius : float, default=50
         Radius for spatial graph
     n_perms : int, default=1000
-        Number of permutations for enrichment
+        Number of permutations for CTI (Squidpy nhood_enrichment)
     save_adata : bool, default=False
         Whether to save the processed AnnData object with analysis results
     skip_cooccurrence : bool, default=False
@@ -836,8 +1079,8 @@ def run_spatial_analysis_pipeline(adata_path, output_dir='spatial_analysis_resul
     #adata = build_spatial_graph(adata, method='radius', radius=radius)
     adata = build_spatial_graph(adata, method='knn',n_neighbors=n_neighbors)
 
-    # Step 2: Neighborhood enrichment
-    adata = neighborhood_enrichment_analysis(adata, n_perms=n_perms)
+    # Step 2: Cell type interaction (CTI)
+    adata = cell_type_interaction_analysis(adata, n_perms=n_perms)
 
     # Step 3: Co-occurrence analysis (skip for large datasets to avoid memory issues)
     if not skip_cooccurrence:
@@ -865,8 +1108,8 @@ def run_spatial_analysis_pipeline(adata_path, output_dir='spatial_analysis_resul
         save_path=output_dir / 'spatial_distribution.png'
     )
 
-    # Enrichment heatmap
-    visualize_enrichment(
+    # CTI heatmap
+    visualize_cell_type_interaction(
         adata,
         save_path=output_dir / 'cell_type_interaction.png',
         n_neighbors=n_neighbors,

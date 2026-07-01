@@ -104,7 +104,9 @@
     "JN_TS_012_tumour_lep_tile_6457_12399",
     "JN_TS_001_tumour_lep_tile_11121_12254",
     "JN_TS_003_tumour_lep_tile_21656_15546",
-    "JN_TS_007_tumour_lep_tile_3888_13879",
+    "JN_TS_007_tumour_lep_tile_3888_13879"
+  ],
+  "tumour_scar": [
     "JN_TS_008_tumour_scar_tile_13288_7309"
   ]
 }

@@ -354,7 +354,7 @@ def main() -> int:
     p.add_argument(
         "--results_root",
         type=str,
-        default="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/cn_unified_results",
+        default="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/cn_unified_results_tumor_merged",
         help="Path containing all_n_cluster=<k>/processed_h5ad folders.",
     )
     p.add_argument(

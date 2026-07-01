@@ -14,7 +14,7 @@ from collections import defaultdict
 # --------------------------------------------------
 # Config
 # --------------------------------------------------
-JSON_DIR = r"/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred/overall"
+JSON_DIR = r"/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/json_reclass"
 CELL_TYPES = list(range(7))  # 0–6 as defined by NucSegAI
 
 # Path to tile categories JSON (defines the 5 groups: bg, margin, tumour_inv, tumour_lep, tumour_scar)

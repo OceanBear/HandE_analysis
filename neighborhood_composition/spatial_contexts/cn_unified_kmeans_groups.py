@@ -28,6 +28,72 @@ warnings.filterwarnings('ignore')
 # Get the directory where this script is located
 SCRIPT_DIR = Path(__file__).parent.resolve()
 
+# Heatmap cell annotations were 12pt; bump to 16pt. Related axis/title sizes +4 for consistency.
+HEATMAP_ANNOT_FONT = 16
+HEATMAP_AXIS_LABEL_FONT = 16
+HEATMAP_TICK_LABEL_FONT = 16
+HEATMAP_TITLE_FONT = 18
+
+# Full cell-type names (h5ad / merge pipeline) -> short labels for figure axes only.
+CELL_TYPE_TO_ABBREV = {
+    "Undefined": "Und",
+    "Tumor": "Tum",
+    "Macrophage": "Mac",
+    "Lymphocyte": "Lym",
+    "Vascular": "Vas",
+    "Fibroblast/Stroma": "Fib/Str",
+    "Epithelium (PD-L1lo/Ki67lo)": "Tum",
+    "Epithelium (PD-L1hi/Ki67hi)": "Tum",
+}
+
+# Left-to-right column order on composition heatmaps (full names as in adata / CSV).
+# Crosstab column order otherwise follows categorical order, which after tile concat
+# often becomes alphabetical — e.g. Fib/Str, Lym, Mac, Tum, Und, Vas.
+CELL_TYPE_HEATMAP_ORDER_FULL: Tuple[str, ...] = (
+    "Undefined",
+    "Tumor",
+    "Epithelium (PD-L1lo/Ki67lo)",
+    "Epithelium (PD-L1hi/Ki67hi)",
+    "Macrophage",
+    "Lymphocyte",
+    "Vascular",
+    "Fibroblast/Stroma",
+)
+
+
+def _canonical_cell_type_column_order(columns) -> List[str]:
+    """Stable order: canonical list first, then any other columns in their original order."""
+    col_list = list(columns)
+    seen: set = set()
+    unique_cols: List[str] = []
+    for c in col_list:
+        s = str(c)
+        if s not in seen:
+            seen.add(s)
+            unique_cols.append(s)
+    canon_set = set(CELL_TYPE_HEATMAP_ORDER_FULL)
+    ordered = [c for c in CELL_TYPE_HEATMAP_ORDER_FULL if c in seen]
+    remaining = [c for c in unique_cols if c not in canon_set]
+    return ordered + remaining
+
+
+def _reorder_cell_type_columns_canonical(df: pd.DataFrame) -> pd.DataFrame:
+    """Reorder columns for heatmaps; indices unchanged."""
+    order = _canonical_cell_type_column_order(df.columns)
+    return df.loc[:, order].copy()
+
+
+def _rename_cell_type_columns_for_plot(df: pd.DataFrame) -> pd.DataFrame:
+    """Copy of df with column names abbreviated for heatmaps only (CSVs unchanged)."""
+    out = df.copy()
+    out.columns = [CELL_TYPE_TO_ABBREV.get(str(c), str(c)) for c in out.columns]
+    return out
+
+
+def _prepare_composition_df_for_heatmap(df: pd.DataFrame) -> pd.DataFrame:
+    """Canonical cell-type order, then abbreviations, for composition heatmaps only."""
+    return _rename_cell_type_columns_for_plot(_reorder_cell_type_columns_canonical(df))
+
 
 def _is_integer_cn_labels(labels) -> bool:
     """Check if CN labels are integers (1, 2, 3) vs strings (CN1, CN3-1)."""
@@ -437,15 +503,17 @@ class GroupCNAnalyzer:
     ):
         """Visualize unified CN composition as heatmap across ALL tiles.
         
-        Note: composition_zscore should preserve the cell type order from the original h5ad files.
+        Column order follows CELL_TYPE_HEATMAP_ORDER_FULL (then abbreviations), not
+        adata categorical order (which is often alphabetical after multi-tile concat).
         """
         print("\nVisualizing unified CN composition heatmap...")
 
         fig, ax = plt.subplots(figsize=figsize)
 
+        z_plot = _prepare_composition_df_for_heatmap(composition_zscore)
         # Create heatmap (order should be preserved from original h5ad files)
         sns.heatmap(
-            composition_zscore,
+            z_plot,
             cmap=cmap,
             center=0,
             vmin=vmin,
@@ -456,22 +524,22 @@ class GroupCNAnalyzer:
             ax=ax,
             annot=show_values,
             fmt='.2f' if show_values else '',
-            annot_kws={'size': 12}
+            annot_kws={'size': HEATMAP_ANNOT_FONT}
         )
 
-        ax.set_xlabel('Cell Type', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Cellular Neighborhood', fontsize=12, fontweight='bold')
+        ax.set_xlabel('Cell Type', fontsize=HEATMAP_AXIS_LABEL_FONT, fontweight='bold')
+        ax.set_ylabel('Cellular Neighborhood', fontsize=HEATMAP_AXIS_LABEL_FONT, fontweight='bold')
         
         n_tiles = adata.obs['tile_name'].nunique()
         n_cells = adata.n_obs
         title = (f'Unified Cell Type Composition by Cellular Neighborhood\n'
                 f'(k={k}, n_clusters={n_clusters}, {n_tiles} tiles, {n_cells:,} cells)\n'
                 f'Z-score scaled by column')
-        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+        ax.set_title(title, fontsize=HEATMAP_TITLE_FONT, fontweight='bold', pad=20)
 
         # Rotate labels
-        plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
-        plt.setp(ax.get_yticklabels(), rotation=0)
+        plt.setp(ax.get_xticklabels(), rotation=45, ha='right', fontsize=HEATMAP_TICK_LABEL_FONT)
+        plt.setp(ax.get_yticklabels(), rotation=0, fontsize=HEATMAP_TICK_LABEL_FONT)
 
         plt.tight_layout()
 
@@ -768,27 +836,13 @@ class GroupCNAnalyzer:
         overall_zscore : pd.DataFrame, optional
             Overall composition Z-scores for comparison
         """
-        # Get the correct cell type order from overall_zscore if available (preserves order from original h5ad files)
-        # Otherwise, use the order from composition_zscore
-        if overall_zscore is not None:
-            cell_type_order = overall_zscore.columns.tolist()
-        else:
-            cell_type_order = composition_zscore.columns.tolist()
-        
         fig, ax = plt.subplots(figsize=figsize)
         
         if overall_zscore is not None:
             # Compute difference: overall - group
-            # Align indices and columns first
             common_rows = composition_zscore.index.intersection(overall_zscore.index)
             common_cols = composition_zscore.columns.intersection(overall_zscore.columns)
-            
-            # Reorder columns according to the cell type order from overall_zscore
-            # Keep only columns that exist in both dataframes and in the order list
-            ordered_cols = [col for col in cell_type_order if col in common_cols]
-            # Add any remaining columns that weren't in the order list (at the end)
-            remaining_cols = [col for col in common_cols if col not in ordered_cols]
-            final_cols = ordered_cols + remaining_cols
+            final_cols = _canonical_cell_type_column_order(list(common_cols))
             
             group_aligned = composition_zscore.loc[common_rows, final_cols]
             overall_aligned = overall_zscore.loc[common_rows, final_cols]
@@ -807,9 +861,10 @@ class GroupCNAnalyzer:
                     group_val = group_aligned.loc[row_idx, col_idx]
                     annot_array[i, j] = f'{diff_val:.2f}({group_val:.2f})'
             
+            zscore_diff_plot = _prepare_composition_df_for_heatmap(zscore_diff)
             # Plot difference (color scale based on difference)
             sns.heatmap(
-                zscore_diff,
+                zscore_diff_plot,
                 cmap='RdYlGn_r',  # Red-Yellow-Green reversed (red=positive diff, green=negative diff)
                 center=0,
                 vmin=-3,
@@ -820,7 +875,7 @@ class GroupCNAnalyzer:
                 ax=ax,
                 annot=annot_array,
                 fmt='',
-                annot_kws={'size': 12}
+                annot_kws={'size': HEATMAP_ANNOT_FONT}
             )
             
             title = (f'Cell Fraction Difference from Overall\n'
@@ -828,11 +883,10 @@ class GroupCNAnalyzer:
                     f'Format: Difference(Group Z-score)')
         else:
             # Fallback if overall not available
-            # Use the order from composition_zscore (should preserve order from original h5ad files)
-            composition_zscore_ordered = composition_zscore[cell_type_order] if all(col in composition_zscore.columns for col in cell_type_order) else composition_zscore
+            composition_plot = _prepare_composition_df_for_heatmap(composition_zscore)
             
             sns.heatmap(
-                composition_zscore_ordered,
+                composition_plot,
                 cmap='RdYlGn_r',
                 center=0,
                 vmin=-2,
@@ -843,19 +897,19 @@ class GroupCNAnalyzer:
                 ax=ax,
                 annot=True,
                 fmt='.2f',
-                annot_kws={'size': 12}
+                annot_kws={'size': HEATMAP_ANNOT_FONT}
             )
             
             title = (f'Cell Type Composition by Cellular Neighborhood\n'
                     f'Group: {group_name} ({n_cells:,} cells)\n'
                     f'Z-score scaled by column')
         
-        ax.set_xlabel('Cell Type', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Cellular Neighborhood', fontsize=12, fontweight='bold')
-        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+        ax.set_xlabel('Cell Type', fontsize=HEATMAP_AXIS_LABEL_FONT, fontweight='bold')
+        ax.set_ylabel('Cellular Neighborhood', fontsize=HEATMAP_AXIS_LABEL_FONT, fontweight='bold')
+        ax.set_title(title, fontsize=HEATMAP_TITLE_FONT, fontweight='bold', pad=20)
         
-        plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
-        plt.setp(ax.get_yticklabels(), rotation=0)
+        plt.setp(ax.get_xticklabels(), rotation=45, ha='right', fontsize=HEATMAP_TICK_LABEL_FONT)
+        plt.setp(ax.get_yticklabels(), rotation=0, fontsize=HEATMAP_TICK_LABEL_FONT)
         plt.tight_layout()
         
         if save_path:
@@ -1201,7 +1255,7 @@ class GroupCNAnalyzer:
     def generate_unified_analysis(
         self,
         k: int = 20,
-        n_clusters: int = 7,
+        n_clusters: int = 5,
         cn_key: str = 'cn_celltype',
         celltype_key: str = 'cell_type',
         color_palette: str = 'tab20'
@@ -1323,7 +1377,7 @@ class GroupCNAnalyzer:
     def generate_individual_tiles(
         self,
         k: int = 20,
-        n_clusters: int = 7,
+        n_clusters: int = 5,
         cn_key: str = 'cn_celltype',
         coord_key: str = 'spatial',
         palette: str = 'tab20'
@@ -1432,7 +1486,7 @@ class GroupCNAnalyzer:
         celltype_key: str = 'cell_type',
         color_palette: str = 'tab20',
         k: int = 20,
-        n_clusters: int = 7,
+        n_clusters: int = 5,
         generate_unified: bool = True,
         generate_individual: bool = True
     ):
@@ -1527,7 +1581,7 @@ def main():
     )
     parser.add_argument(
         '--processed_h5ad_dir',
-        default='/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/cn_unified_results/all_n_cluster=13/processed_h5ad',
+        default="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/cn_unified_results_tumor_merged_n=5/processed_h5ad",
         help='Directory containing processed h5ad files with CN annotations'
     )
     parser.add_argument(
@@ -1537,7 +1591,7 @@ def main():
     )
     parser.add_argument(
         '--output_dir',
-        default='cn_unified_results_groups',
+        default='/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/cn_unified_results_tumor_merged_n=5/groups',
         help='Output directory for group-specific results (relative to script directory)'
     )
     parser.add_argument(
@@ -1569,7 +1623,7 @@ def main():
     parser.add_argument(
         '--n_clusters',
         type=int,
-        default=None,
+        default=5,
         help='Number of clusters used (for titles, will try to infer from directory name if not provided)'
     )
     parser.add_argument(
@@ -1603,7 +1657,7 @@ def main():
         if match:
             args.n_clusters = int(match.group(1))
         else:
-            args.n_clusters = 7  # Default
+            args.n_clusters = 5  # Default
     
     # Initialize analyzer
     analyzer = GroupCNAnalyzer(

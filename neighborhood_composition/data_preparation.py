@@ -293,77 +293,82 @@ def combine_multiple_tiles(json_paths, tile_positions=None):
     return adata_combined
 
 
-# Example usage
+def _parse_main():
+    import argparse
+
+    p = argparse.ArgumentParser(
+        description="Convert NucSegAI JSON to AnnData (.h5ad): single file, batch directory, or combine tiles."
+    )
+    p.add_argument(
+        "--mode",
+        choices=("single", "batch", "combine"),
+        default="batch",
+        help="single: one JSON; batch: all *.json in --json-dir; combine: merge --json paths.",
+    )
+    p.add_argument("--json", type=str, default=None, help="Path to one JSON file (mode=single).")
+    p.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Output .h5ad path (mode=single). Default: <json_stem>.h5ad next to JSON.",
+    )
+    p.add_argument(
+        "--json-dir",
+        type=str,
+        default=None,
+        help="Directory of *.json files (mode=batch).",
+    )
+    p.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Directory for output .h5ad files (mode=batch). Default: same as each JSON parent.",
+    )
+    p.add_argument(
+        "--json-list",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Explicit JSON paths (mode=batch or combine). For combine, order is preserved.",
+    )
+    p.add_argument(
+        "--combined-output",
+        type=str,
+        default="combined_tiles.h5ad",
+        help="Output path for mode=combine (default: combined_tiles.h5ad).",
+    )
+    return p.parse_args()
+
+
 if __name__ == "__main__":
-    # ========================================================================
-    # PROCESSING MODE SELECTION
-    # ========================================================================
-    # Choose one of the following modes:
-    # - 'single': Process a single JSON file
-    # - 'batch': Process multiple JSON files (saves each as separate h5ad)
-    # - 'combine': Combine multiple tiles into one AnnData object
-    # ========================================================================
+    args = _parse_main()
 
-    # Change this to 'single', 'batch', or 'combine'
-
-    MODE = 'batch'
-    # ========================================================================
-    # MODE 1: SINGLE FILE PROCESSING
-    # ========================================================================
-    if MODE == 'single':
-        json_path = '/mnt/g/GDC-TCGA-LUAD/00a0b174-1eab-446a-ba8c-7c6e3acd7f0c/TCGA-MN-A4N4-01Z-00-DX2.9550732D-8FB1-43D9-B094-7C0CD310E9C0.json'
-
+    if args.mode == "single":
+        if not args.json:
+            raise SystemExit("mode=single requires --json PATH")
+        json_path = args.json
         adata = load_json_to_anndata(json_path)
+        out = Path(args.output) if args.output else Path(json_path).with_suffix(".h5ad")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        adata.write(out)
+        print(f"\nAnnData object saved to '{out}'")
 
-        # Save to h5ad format for later use
-        output_path = Path(json_path).stem + '.h5ad'
-        adata.write(output_path)
-        print(f"\nAnnData object saved to '{output_path}'")
+    elif args.mode == "batch":
+        if args.json_list:
+            batch_process_json_files(json_paths=args.json_list, output_dir=args.output_dir)
+        elif args.json_dir:
+            batch_process_json_files(json_dir=args.json_dir, output_dir=args.output_dir)
+        else:
+            raise SystemExit("mode=batch requires --json-dir DIR or --json-list FILE1.json FILE2.json ...")
 
-    # ========================================================================
-    # MODE 2: BATCH PROCESSING (NEW)
-    # ========================================================================
-    elif MODE == 'batch':
-        # Option A: Process all JSON files in a directory
-        json_dir = '/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred/json'    # /mnt/g/GDC-TCGA-LUAD/00a0b174-1eab-446a-ba8c-7c6e3acd7f0c/pred/json
-        output_dir = '/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred/h5ad'  # /mnt/g/GDC-TCGA-LUAD/00a0b174-1eab-446a-ba8c-7c6e3acd7f0c/pred/h5ad
-
-        results = batch_process_json_files(
-            json_dir=json_dir,
-            output_dir=output_dir  # Set to None to save in same directory as JSON files
-        )
-
-        # Option B: Process specific list of JSON files (uncomment to use)
-        # json_paths = [
-        #     '/path/to/file1.json',
-        #     '/path/to/file2.json',
-        #     '/path/to/file3.json'
-        # ]
-        # results = batch_process_json_files(
-        #     json_paths=json_paths,
-        #     output_dir=None  # Optional output directory
-        # )
-
-    # ========================================================================
-    # MODE 3: COMBINE MULTIPLE TILES
-    # ========================================================================
-    elif MODE == 'combine':
-        json_paths = ['tile_1.json', 'tile_2.json', 'tile_3.json']
-
-        # Optional: Provide tile positions for spatial alignment
-        # tile_positions = {
-        #     'tile_1': (0, 0),
-        #     'tile_2': (1000, 0),
-        #     'tile_3': (0, 1000)
-        # }
-
-        adata_combined = combine_multiple_tiles(
-            json_paths,
-            # tile_positions=tile_positions  # Uncomment if using positions
-        )
-
-        adata_combined.write('combined_tiles.h5ad')
-        print(f"\nCombined AnnData object saved to 'combined_tiles.h5ad'")
+    elif args.mode == "combine":
+        if not args.json_list:
+            raise SystemExit("mode=combine requires --json-list FILE1.json FILE2.json ...")
+        adata_combined = combine_multiple_tiles(args.json_list)
+        out = Path(args.combined_output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        adata_combined.write(out)
+        print(f"\nCombined AnnData object saved to '{out}'")
 
     else:
-        raise ValueError(f"Invalid MODE: '{MODE}'. Must be 'single', 'batch', or 'combine'")
+        raise ValueError(f"Invalid mode: {args.mode!r}")

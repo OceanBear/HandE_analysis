@@ -1,8 +1,8 @@
 """
-Neighborhood Enrichment Analysis for Multiple Tiled Images
+Cell type interaction (CTI) analysis for multiple tiled images
 
-This script processes multiple tiled images from a directory and performs
-spatial neighborhood enrichment analysis on each tile individually.
+This script processes multiple tiled images from a directory and runs
+spatial cell type interaction (CTI) analysis on each tile individually.
 
 Features:
 - Batch processing of multiple h5ad files
@@ -35,9 +35,9 @@ os.chdir(Path(__file__).parent)
 from cti_tiled import (
     load_and_apply_cell_type_colors,
     build_spatial_graph,
-    neighborhood_enrichment_analysis,
+    cell_type_interaction_analysis,
     compute_centrality_scores,
-    visualize_enrichment,
+    visualize_cell_type_interaction,
     visualize_spatial_distribution,
     summarize_interactions,
     save_intermediate_results,
@@ -100,10 +100,13 @@ def is_tile_processed(output_dir, tile_name):
     """
     output_dir = Path(output_dir)
 
-    # Check for all expected output files with tile name prefix
+    cti_path = output_dir / f'{tile_name}_cti.png'
+    legacy_cti_path = output_dir / f'{tile_name}_neighborhood_enrichment.png'
+    if not cti_path.exists() and not legacy_cti_path.exists():
+        return False
+
     expected_files = [
         f'{tile_name}_spatial_distribution.png',
-        f'{tile_name}_neighborhood_enrichment.png',
         f'{tile_name}_significant_interactions.csv',
         f'{tile_name}_zscore.npy',         # Intermediate file for aggregation
         f'{tile_name}_metadata.json'       # Intermediate metadata
@@ -226,16 +229,16 @@ def process_single_tile(
     except Exception as e:
         raise RuntimeError(f"Failed to build spatial graph: {e}")
 
-    # Neighborhood enrichment
+    # Cell type interaction (CTI)
     try:
-        adata = neighborhood_enrichment_analysis(
+        adata = cell_type_interaction_analysis(
             adata,
             cluster_key=cluster_key,
             n_perms=n_perms
         )
     except ZeroDivisionError as e:
         raise RuntimeError(
-            f"Division by zero in neighborhood enrichment. "
+            f"Division by zero in cell type interaction (CTI) analysis. "
             f"This often occurs when:\n"
             f"  1. A cell type has insufficient cells (<{min_cells_per_type}) or no neighbors\n"
             f"  2. All cells of a type are isolated (no spatial connectivity)\n"
@@ -244,7 +247,7 @@ def process_single_tile(
             f"Original error: {e}"
         )
     except Exception as e:
-        raise RuntimeError(f"Failed neighborhood enrichment analysis: {e}")
+        raise RuntimeError(f"Failed cell type interaction (CTI) analysis: {e}")
 
     # Centrality scores
     try:
@@ -268,12 +271,12 @@ def process_single_tile(
         save_path=output_dir / f'{tile_name}_spatial_distribution.png'
     )
 
-    visualize_enrichment(
+    visualize_cell_type_interaction(
         adata,
         cluster_key=cluster_key,
         n_perms=n_perms,
         n_neighbors=n_neighbors,
-        save_path=output_dir / f'{tile_name}_neighborhood_enrichment.png'
+        save_path=output_dir / f'{tile_name}_cti.png'
     )
 
     # Summarize interactions
@@ -494,11 +497,12 @@ def run_multiple_tiles_pipeline(
     print(f"\nProcessed tiles: {len(successful_tiles)}")
     print(f"  - Individual tile results saved in: {output_dir}/<tile_name>/")
     print(f"  - Each tile directory contains:")
-    print(f"    * {cluster_key}_spatial_distribution.png")
-    print(f"    * {cluster_key}_neighborhood_enrichment.png")
-    print(f"    * {cluster_key}_significant_interactions.csv")
-    print(f"    * {cluster_key}_zscore.npy (intermediate file for aggregation)")
-    print(f"    * {cluster_key}_metadata.json (intermediate metadata)")
+    print(f"    * <tile_name>_spatial_distribution.png")
+    print(f"    * <tile_name>_cti.png")
+    print(f"    * <tile_name>_significant_interactions.csv")
+    print(f"    * <tile_name>_zscore.npy (intermediate file for aggregation)")
+    print(f"    * <tile_name>_sigval.npy (Schapiro-style −1/0/1 per tile, optional for old runs)")
+    print(f"    * <tile_name>_metadata.json (intermediate metadata)")
 
     if failed_tiles:
         print(f"\nFailed tiles: {len(failed_tiles)}")
@@ -531,7 +535,7 @@ def run_multiple_tiles_pipeline(
 # Example usage
 if __name__ == "__main__":
     # Configuration
-    tiles_directory = '/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred/h5ad'
+    tiles_directory = '/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/h5ad'
     output_dir = 'cti_multiple_tiles'
 
     # Run pipeline on multiple tiles
@@ -557,7 +561,7 @@ Batch Processing Results:
 1. INDIVIDUAL TILE RESULTS:
    - Each tile processed independently
    - Results saved in separate subdirectories
-   - Contains spatial distribution, enrichment heatmaps, and interactions
+   - Contains spatial distribution, CTI heatmaps, and interaction summaries
 
 2. INTERMEDIATE FILES:
    - zscore.npy files for each tile (used in aggregation)
