@@ -22,6 +22,10 @@ set -euo pipefail
 # Mode: batch | single | combine
 MODE="batch"
 
+# 4-class model: Others, Tumor, Lymphocyte, Fibroblast/Stroma
+# (resolved relative to SCRIPT_DIR after it is set below)
+TYPE_INFO_JSON=""
+
 # --- batch: all *.json in JSON_DIR → OUTPUT_DIR (leave OUTPUT_DIR empty to write next to each JSON) ---
 JSON_DIR="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/json"
 OUTPUT_DIR="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/h5ad"
@@ -41,6 +45,16 @@ JSON_LIST=(
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="${PYTHON:-python3}"
 PREP="${SCRIPT_DIR}/data_preparation.py"
+TYPE_INFO_JSON="${TYPE_INFO_JSON:-${SCRIPT_DIR}/../type_info_4class.json}"
+
+type_info_args() {
+  if [[ -f "${TYPE_INFO_JSON}" ]]; then
+    echo --type-info "${TYPE_INFO_JSON}"
+  else
+    echo "TYPE_INFO_JSON not found: ${TYPE_INFO_JSON}" >&2
+    exit 1
+  fi
+}
 
 usage() {
   echo "Usage:"
@@ -65,9 +79,9 @@ run_from_config() {
         exit 1
       fi
       if [[ -n "${OUTPUT_DIR}" ]]; then
-        exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR" --output-dir "$OUTPUT_DIR"
+        exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR" --output-dir "$OUTPUT_DIR" $(type_info_args)
       else
-        exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR"
+        exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR" $(type_info_args)
       fi
       ;;
     single)
@@ -76,9 +90,9 @@ run_from_config() {
         exit 1
       fi
       if [[ -n "${OUTPUT_H5AD}" ]]; then
-        exec "$PY" "$PREP" --mode single --json "$JSON_PATH" --output "$OUTPUT_H5AD"
+        exec "$PY" "$PREP" --mode single --json "$JSON_PATH" --output "$OUTPUT_H5AD" $(type_info_args)
       else
-        exec "$PY" "$PREP" --mode single --json "$JSON_PATH"
+        exec "$PY" "$PREP" --mode single --json "$JSON_PATH" $(type_info_args)
       fi
       ;;
     combine)
@@ -90,7 +104,7 @@ run_from_config() {
         echo "CONFIG: MODE=combine requires JSON_LIST array with at least one path." >&2
         exit 1
       fi
-      exec "$PY" "$PREP" --mode combine --combined-output "$COMBINED_H5AD" --json-list "${JSON_LIST[@]}"
+      exec "$PY" "$PREP" --mode combine --combined-output "$COMBINED_H5AD" --json-list "${JSON_LIST[@]}" $(type_info_args)
       ;;
     *)
       echo "CONFIG: MODE must be batch, single, or combine (got: ${MODE})" >&2
@@ -119,9 +133,9 @@ case "$MODE_CLI" in
       usage 1
     fi
     if [[ -n "$OUT_DIR" ]]; then
-      exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR" --output-dir "$OUT_DIR"
+      exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR" --output-dir "$OUT_DIR" $(type_info_args)
     else
-      exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR"
+      exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR" $(type_info_args)
     fi
     ;;
   single)
@@ -129,16 +143,16 @@ case "$MODE_CLI" in
     OUT_H5AD="${2:-}"
     [[ -n "$JSON_PATH" ]] || { echo "single: require JSON_PATH" >&2; usage 1; }
     if [[ -n "$OUT_H5AD" ]]; then
-      exec "$PY" "$PREP" --mode single --json "$JSON_PATH" --output "$OUT_H5AD"
+      exec "$PY" "$PREP" --mode single --json "$JSON_PATH" --output "$OUT_H5AD" $(type_info_args)
     else
-      exec "$PY" "$PREP" --mode single --json "$JSON_PATH"
+      exec "$PY" "$PREP" --mode single --json "$JSON_PATH" $(type_info_args)
     fi
     ;;
   combine)
     COMBINED="${1:-}"
     shift || true
     [[ -n "$COMBINED" && $# -ge 1 ]] || { echo "combine: require OUTPUT_H5AD and at least one JSON" >&2; usage 1; }
-    exec "$PY" "$PREP" --mode combine --combined-output "$COMBINED" --json-list "$@"
+    exec "$PY" "$PREP" --mode combine --combined-output "$COMBINED" --json-list "$@" $(type_info_args)
     ;;
   *)
     echo "Unknown command: $MODE_CLI" >&2

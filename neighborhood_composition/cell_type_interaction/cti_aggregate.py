@@ -119,15 +119,11 @@ def merge_epithelium_in_interactions_df(
     return out
 
 
-# Short names for aggregated heatmap axis labels (matches neighborhood_composition/data_preparation.py)
+# Short names for aggregated heatmap axis labels (matches type_info_4class.json / data_preparation.py)
 DEFAULT_CELL_TYPE_DISPLAY_ABBREV = {
-    "Undefined": "Und",
+    "Others": "Oth",
     "Tumor": "Tum",
-    "Epithelium (PD-L1lo/Ki67lo)": "Epi-lo",
-    "Epithelium (PD-L1hi/Ki67hi)": "Epi-hi",
-    "Macrophage": "Mac",
     "Lymphocyte": "Lym",
-    "Vascular": "Vas",
     "Fibroblast/Stroma": "Fib/Str",
 }
 
@@ -209,7 +205,7 @@ def aggregate_results(
     n_neighbors=None,
     cluster_key='cell_type',
     *,
-    merge_epithelium_to_tumor=True,
+    merge_epithelium_to_tumor=False,
     tumor_label='Tumor',
     cti_heatmap_annot_fontsize=32,
     use_short_cell_type_labels_in_plots=True,
@@ -232,8 +228,8 @@ def aggregate_results(
         Number of neighbors used (for display in plots)
     cluster_key : str, default='cell_type'
         Key for cell type labels
-    merge_epithelium_to_tumor : bool, default=True
-        Merge the two default epithelium types into ``tumor_label`` in z-scores and interaction CSVs.
+    merge_epithelium_to_tumor : bool, default=False
+        Merge legacy 7-class epithelium labels into ``tumor_label`` (only needed for old h5ad outputs).
     tumor_label : str, default='Tumor'
         Target label after merging epithelium A/B.
     cti_heatmap_annot_fontsize : float, default=12
@@ -431,9 +427,9 @@ def main():
         help='Key for cell type labels (default: cell_type)'
     )
     parser.add_argument(
-        '--no-merge-epithelium',
+        '--merge-epithelium',
         action='store_true',
-        help='Disable merging the two epithelium types into Tumor (default: merge is ON).',
+        help='Merge legacy 7-class epithelium labels into Tumor (for old h5ad outputs only).',
     )
     parser.add_argument(
         '--tumor-label',
@@ -484,7 +480,7 @@ def main():
         n_perms=args.n_perms,
         n_neighbors=args.n_neighbors,
         cluster_key=args.cluster_key,
-        merge_epithelium_to_tumor=not args.no_merge_epithelium,
+        merge_epithelium_to_tumor=args.merge_epithelium,
         tumor_label=args.tumor_label,
         cti_heatmap_annot_fontsize=args.heatmap_annot_fontsize,
         use_short_cell_type_labels_in_plots=not args.no_short_cell_type_labels,

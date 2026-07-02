@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -14,11 +15,15 @@ import seaborn as sns
 from scipy.spatial.distance import pdist, squareform
 from matplotlib.colors import LinearSegmentedColormap
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "neighborhood_composition"))
+from cell_type_config import load_cell_type_config
+
 # --------------------------------------------------
 # Defaults (overridden by CLI / bash)
 # --------------------------------------------------
 JSON_DIR = r"/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/json_reclass"
-CELL_TYPES = list(range(7))  # 0–6 as defined by NucSegAI
+_CELL_TYPE_DICT, _, _ = load_cell_type_config()
+CELL_TYPES = sorted(_CELL_TYPE_DICT.keys())  # 0–3 as defined by type_info_4class.json
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)

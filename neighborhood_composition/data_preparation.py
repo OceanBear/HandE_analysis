@@ -5,34 +5,18 @@ import anndata as ad
 from pathlib import Path
 from tqdm import tqdm
 import os
-from pathlib import Path
+
+from cell_type_config import (
+    DEFAULT_TYPE_INFO_PATH,
+    cell_type_category_order,
+    load_cell_type_config,
+)
+
 # Set the working directory to the script's directory
 os.chdir(Path(__file__).parent)
-# Cell type mapping
-CELL_TYPE_DICT = {
-    0: "Undefined",
-    1: "Epithelium (PD-L1lo/Ki67lo)",
-    2: "Epithelium (PD-L1hi/Ki67hi)",
-    3: "Macrophage",
-    4: "Lymphocyte",
-    5: "Vascular",
-    6: "Fibroblast/Stroma"
-}
-
-# Color mapping for visualization
-
-CELL_TYPE_COLORS = {
-    0: "#000000",  # Black (RGB: 0, 0, 0) - Undefined
-    1: "#387F39",  # Dark Green (RGB: 56, 127, 57) - Epithelium low
-    2: "#00FF00",  # Bright Green (RGB: 0, 255, 0) - Epithelium high
-    3: "#FC8D62",  # Coral/Salmon (RGB: 252, 141, 98) - Macrophage
-    4: "#FFD92F",  # Yellow (RGB: 255, 217, 47) - Lymphocyte
-    5: "#4535C1",  # Blue/Purple (RGB: 69, 53, 193) - VascularC
-    6: "#17BECF"   # Cyan (RGB: 23, 190, 207) - Fibroblast/Stroma
-}
 
 
-def load_json_to_anndata(json_path, tile_name=None, image_height=None):
+def load_json_to_anndata(json_path, tile_name=None, image_height=None, type_info_path=None):
     """
     Convert NucSegAI JSON output to AnnData object for Squidpy analysis.
 
@@ -45,12 +29,15 @@ def load_json_to_anndata(json_path, tile_name=None, image_height=None):
     image_height : int, optional
         Height of the image in pixels (for Y-axis inversion)
         If not provided, will be inferred from max Y coordinate
+    type_info_path : str or Path, optional
+        Path to type_info JSON (default: project root type_info_4class.json)
 
     Returns:
     --------
     adata : AnnData
         AnnData object with spatial information
     """
+    cell_type_dict, cell_type_colors, _ = load_cell_type_config(type_info_path)
 
     # Load JSON data
     print(f"Loading JSON file: {json_path}")
@@ -69,6 +56,7 @@ def load_json_to_anndata(json_path, tile_name=None, image_height=None):
     cell_ids = []
     centroids = []
     cell_types = []
+    cell_type_ids = []
     cell_type_probs = []
     bboxes = []
 
@@ -82,8 +70,14 @@ def load_json_to_anndata(json_path, tile_name=None, image_height=None):
         centroids.append([centroid_x, centroid_y])
 
         # Cell type information
-        cell_type_id = cell_info['type']
-        cell_types.append(CELL_TYPE_DICT[cell_type_id])
+        cell_type_id = int(cell_info['type'])
+        if cell_type_id not in cell_type_dict:
+            raise KeyError(
+                f"Unknown cell type id {cell_type_id} in {json_path}. "
+                f"Expected ids: {sorted(cell_type_dict.keys())}"
+            )
+        cell_types.append(cell_type_dict[cell_type_id])
+        cell_type_ids.append(cell_type_id)
         cell_type_probs.append(cell_info['type_prob'])
 
         # Bounding box information
@@ -91,14 +85,12 @@ def load_json_to_anndata(json_path, tile_name=None, image_height=None):
 
     # Create observations dataframe
     print("Creating AnnData object...")
-    # Ensure categorical order matches cell_type_id order
-    cell_type_categories = [CELL_TYPE_DICT[i] for i in sorted(CELL_TYPE_DICT.keys())]
+    cell_type_categories = cell_type_category_order(cell_type_dict)
 
     obs_df = pd.DataFrame({
         'cell_id': cell_ids,
         'cell_type': pd.Categorical(cell_types, categories=cell_type_categories, ordered=True),
-        'cell_type_id': [list(CELL_TYPE_DICT.keys())[list(CELL_TYPE_DICT.values()).index(ct)]
-                         for ct in cell_types],
+        'cell_type_id': cell_type_ids,
         'cell_type_prob': cell_type_probs,
         'tile_name': tile_name
     })
@@ -130,8 +122,9 @@ def load_json_to_anndata(json_path, tile_name=None, image_height=None):
     adata.obsm['spatial'] = spatial_coords
 
     # Add cell type colors for visualization
-    adata.uns['cell_type_colors'] = [CELL_TYPE_COLORS[ct_id]
-                                     for ct_id in sorted(CELL_TYPE_DICT.keys())]
+    adata.uns['cell_type_colors'] = [
+        cell_type_colors[ct_id] for ct_id in sorted(cell_type_dict.keys())
+    ]
 
     # Store bounding box information in obsm
     # JSON format: [[y_min, x_min], [y_max, x_max]]
@@ -161,7 +154,7 @@ def load_json_to_anndata(json_path, tile_name=None, image_height=None):
     return adata
 
 
-def batch_process_json_files(json_dir=None, json_paths=None, output_dir=None):
+def batch_process_json_files(json_dir=None, json_paths=None, output_dir=None, type_info_path=None):
     """
     Batch process multiple JSON files and save each as a separate h5ad file.
 
@@ -176,6 +169,8 @@ def batch_process_json_files(json_dir=None, json_paths=None, output_dir=None):
     output_dir : str or Path, optional
         Directory to save output h5ad files
         If None, saves in the same directory as each JSON file
+    type_info_path : str or Path, optional
+        Path to type_info JSON (default: project root type_info_4class.json)
 
     Returns:
     --------
@@ -217,7 +212,7 @@ def batch_process_json_files(json_dir=None, json_paths=None, output_dir=None):
     for json_path in tqdm(json_paths, desc="Processing JSON files", unit="file"):
         try:
             # Load and convert JSON to AnnData
-            adata = load_json_to_anndata(json_path)
+            adata = load_json_to_anndata(json_path, type_info_path=type_info_path)
 
             # Determine output path
             if output_dir is not None:
@@ -250,7 +245,7 @@ def batch_process_json_files(json_dir=None, json_paths=None, output_dir=None):
     return results
 
 
-def combine_multiple_tiles(json_paths, tile_positions=None):
+def combine_multiple_tiles(json_paths, tile_positions=None, type_info_path=None):
     """
     Combine multiple tiles into a single AnnData object.
 
@@ -261,6 +256,8 @@ def combine_multiple_tiles(json_paths, tile_positions=None):
     tile_positions : dict, optional
         Dictionary mapping tile names to (x_offset, y_offset) positions
         If None, tiles will be arranged sequentially
+    type_info_path : str or Path, optional
+        Path to type_info JSON (default: project root type_info_4class.json)
 
     Returns:
     --------
@@ -272,7 +269,9 @@ def combine_multiple_tiles(json_paths, tile_positions=None):
 
     for i, json_path in tqdm(enumerate(json_paths), total=len(json_paths), desc="Processing tiles"):
         tile_name = Path(json_path).stem
-        adata_tile = load_json_to_anndata(json_path, tile_name=tile_name)
+        adata_tile = load_json_to_anndata(
+            json_path, tile_name=tile_name, type_info_path=type_info_path
+        )
 
         # Adjust spatial coordinates if positions provided
         if tile_positions and tile_name in tile_positions:
@@ -337,17 +336,24 @@ def _parse_main():
         default="combined_tiles.h5ad",
         help="Output path for mode=combine (default: combined_tiles.h5ad).",
     )
+    p.add_argument(
+        "--type-info",
+        type=str,
+        default=str(DEFAULT_TYPE_INFO_PATH),
+        help="Path to type_info JSON (default: project root type_info_4class.json).",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_main()
+    type_info_path = args.type_info
 
     if args.mode == "single":
         if not args.json:
             raise SystemExit("mode=single requires --json PATH")
         json_path = args.json
-        adata = load_json_to_anndata(json_path)
+        adata = load_json_to_anndata(json_path, type_info_path=type_info_path)
         out = Path(args.output) if args.output else Path(json_path).with_suffix(".h5ad")
         out.parent.mkdir(parents=True, exist_ok=True)
         adata.write(out)
@@ -355,16 +361,24 @@ if __name__ == "__main__":
 
     elif args.mode == "batch":
         if args.json_list:
-            batch_process_json_files(json_paths=args.json_list, output_dir=args.output_dir)
+            batch_process_json_files(
+                json_paths=args.json_list,
+                output_dir=args.output_dir,
+                type_info_path=type_info_path,
+            )
         elif args.json_dir:
-            batch_process_json_files(json_dir=args.json_dir, output_dir=args.output_dir)
+            batch_process_json_files(
+                json_dir=args.json_dir,
+                output_dir=args.output_dir,
+                type_info_path=type_info_path,
+            )
         else:
             raise SystemExit("mode=batch requires --json-dir DIR or --json-list FILE1.json FILE2.json ...")
 
     elif args.mode == "combine":
         if not args.json_list:
             raise SystemExit("mode=combine requires --json-list FILE1.json FILE2.json ...")
-        adata_combined = combine_multiple_tiles(args.json_list)
+        adata_combined = combine_multiple_tiles(args.json_list, type_info_path=type_info_path)
         out = Path(args.combined_output)
         out.parent.mkdir(parents=True, exist_ok=True)
         adata_combined.write(out)

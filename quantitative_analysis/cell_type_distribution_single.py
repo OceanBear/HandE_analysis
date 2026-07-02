@@ -18,9 +18,13 @@ import matplotlib.patheffects as patheffects
 import seaborn as sns
 from pathlib import Path
 from collections import Counter, defaultdict
+import sys
 import warnings
 
 warnings.filterwarnings('ignore')
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "neighborhood_composition"))
+from cell_type_config import load_cell_type_config
 
 # --- Configuration ---
 # ⚠️ Update this path to your specific input JSON file
@@ -35,27 +39,8 @@ CONFIDENCE_THRESHOLD = 0.5
 # Tile physical size configuration (mm²)
 TILE_AREA_MM2 = 4.0
 
-# Cell type mapping
-CELL_TYPE_DICT = {
-    0: "Undefined",
-    1: "Epithelium (PD-L1lo/Ki67lo)",
-    2: "Epithelium (PD-L1hi/Ki67hi)",
-    3: "Macrophage",
-    4: "Lymphocyte",
-    5: "Vascular",
-    6: "Fibroblast/Stroma"
-}
-
-# Color mapping for visualization (converted from RGB to hex)
-CELL_TYPE_COLORS = {
-    0: "#000000",  # Black - Undefined
-    1: "#387F39",  # Dark Green - Epithelium low
-    2: "#00FF00",  # Bright Green - Epithelium high
-    3: "#FC8D62",  # Coral/Salmon - Macrophage
-    4: "#FFD92F",  # Yellow - Lymphocyte
-    5: "#4535C1",  # Blue/Purple - Vascular
-    6: "#17BECF"   # Cyan - Fibroblast/Stroma
-}
+# Cell type mapping (4-class model: type_info_4class.json)
+CELL_TYPE_DICT, CELL_TYPE_COLORS, _ = load_cell_type_config()
 
 # Set style for visualizations
 sns.set_style("whitegrid")
@@ -152,7 +137,7 @@ def analyze_single_json(json_path, tile_area_mm2=TILE_AREA_MM2):
 
 def apply_confidence_filter(json_path, threshold=0.5, tile_area_mm2=TILE_AREA_MM2):
     """
-    Apply confidence threshold filter to reclassify low-confidence predictions as Undefined.
+    Apply confidence threshold filter to reclassify low-confidence predictions as Others (type 0).
 
     Args:
         json_path (str or Path): Path to JSON file
@@ -453,7 +438,7 @@ def extract_confidence_by_type(json_path, threshold=None):
     Args:
         json_path (str or Path): Path to JSON file
         threshold (float, optional): If set, apply confidence filter and group by filtered type.
-            Low-confidence cells are reclassified as Undefined (0).
+            Low-confidence cells are reclassified as Others (0).
 
     Returns:
         tuple: (filename, dict mapping cell_type -> list of confidence values)
@@ -470,7 +455,7 @@ def extract_confidence_by_type(json_path, threshold=None):
         cell_type = nucleus_data.get('type', 0)
         type_prob = nucleus_data.get('type_prob', 0)
         if threshold is not None and type_prob < threshold and cell_type != 0:
-            cell_type = 0  # Reclassify as Undefined
+            cell_type = 0  # Reclassify as Others
         probs_by_type[cell_type].append(type_prob)
 
     return filename, dict(probs_by_type)
@@ -623,7 +608,7 @@ def main():
     # Step 2: Apply confidence filter
     filtered_results = apply_confidence_filter(json_path, threshold=CONFIDENCE_THRESHOLD)
     print(f"📊 Filtered analysis complete (threshold={CONFIDENCE_THRESHOLD})")
-    print(f"   Reclassified {filtered_results['reclassified_count']:,} cells as Undefined\n")
+    print(f"   Reclassified {filtered_results['reclassified_count']:,} cells as Others\n")
 
     # Step 3: Display results
     display_results(filtered_results)

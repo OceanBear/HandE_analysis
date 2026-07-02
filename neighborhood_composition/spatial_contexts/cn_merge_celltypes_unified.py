@@ -2,7 +2,7 @@
 Merge cell-type labels in per-tile h5ads, then re-run unified CN (cn_unified_kmeans pipeline).
 
 Phase A: copy tiles from --source_tiles_dir to --merged_tiles_dir with remapped cell types
-         (default: two Epithelium labels -> "Tumor" per data_preparation.py naming).
+         (optional; default: no remapping — 4-class model already uses Tumor, etc.).
 Phase B: UnifiedCellularNeighborhoodDetector on merged tiles -> --output_dir.
 
 Does not overwrite original tiles; use a new merged_tiles_dir and output_dir.
@@ -23,19 +23,14 @@ os.chdir(Path(__file__).parent)
 
 from cn_unified_kmeans import DEFAULT_RANDOM_STATE, UnifiedCellularNeighborhoodDetector
 
-# Matches neighborhood_composition/data_preparation.py CELL_TYPE_DICT (epithelium -> Tumor)
-DEFAULT_MERGE_MAP: Dict[str, str] = {
-    "Epithelium (PD-L1lo/Ki67lo)": "Tumor",
-    "Epithelium (PD-L1hi/Ki67hi)": "Tumor",
-}
+# 4-class model (type_info_4class.json / data_preparation.py); override via --merge-map JSON
+DEFAULT_MERGE_MAP: Dict[str, str] = {}
 
-# Stable category order after merge (6 types)
+# Stable category order (4 types)
 DEFAULT_CATEGORY_ORDER: List[str] = [
-    "Undefined",
+    "Others",
     "Tumor",
-    "Macrophage",
     "Lymphocyte",
-    "Vascular",
     "Fibroblast/Stroma",
 ]
 
@@ -191,7 +186,7 @@ def main() -> int:
         "--merge_map_json",
         type=str,
         default=None,
-        help='JSON object {"old":"new",...}. Default: two Epithelium -> Tumor.',
+        help='JSON object {"old":"new",...}. Default: no remapping (4-class model).',
     )
     p.add_argument(
         "--category_order_json",

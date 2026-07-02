@@ -34,29 +34,19 @@ HEATMAP_AXIS_LABEL_FONT = 16
 HEATMAP_TICK_LABEL_FONT = 16
 HEATMAP_TITLE_FONT = 18
 
-# Full cell-type names (h5ad / merge pipeline) -> short labels for figure axes only.
+# Full cell-type names (h5ad / data_preparation.py) -> short labels for figure axes only.
 CELL_TYPE_TO_ABBREV = {
-    "Undefined": "Und",
+    "Others": "Oth",
     "Tumor": "Tum",
-    "Macrophage": "Mac",
     "Lymphocyte": "Lym",
-    "Vascular": "Vas",
     "Fibroblast/Stroma": "Fib/Str",
-    "Epithelium (PD-L1lo/Ki67lo)": "Tum",
-    "Epithelium (PD-L1hi/Ki67hi)": "Tum",
 }
 
 # Left-to-right column order on composition heatmaps (full names as in adata / CSV).
-# Crosstab column order otherwise follows categorical order, which after tile concat
-# often becomes alphabetical — e.g. Fib/Str, Lym, Mac, Tum, Und, Vas.
 CELL_TYPE_HEATMAP_ORDER_FULL: Tuple[str, ...] = (
-    "Undefined",
+    "Others",
     "Tumor",
-    "Epithelium (PD-L1lo/Ki67lo)",
-    "Epithelium (PD-L1hi/Ki67hi)",
-    "Macrophage",
     "Lymphocyte",
-    "Vascular",
     "Fibroblast/Stroma",
 )
 

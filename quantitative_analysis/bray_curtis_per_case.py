@@ -1,6 +1,9 @@
-import os
 import json
+import os
 import re
+import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -11,11 +14,15 @@ from scipy.spatial.distance import pdist, squareform
 from matplotlib.colors import LinearSegmentedColormap
 from collections import defaultdict
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "neighborhood_composition"))
+from cell_type_config import load_cell_type_config
+
 # --------------------------------------------------
 # Config
 # --------------------------------------------------
 JSON_DIR = r"/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/json_reclass"
-CELL_TYPES = list(range(7))  # 0–6 as defined by NucSegAI
+_CELL_TYPE_DICT, _, _ = load_cell_type_config()
+CELL_TYPES = sorted(_CELL_TYPE_DICT.keys())  # 0–3 as defined by type_info_4class.json
 
 # Path to tile categories JSON (defines the 5 groups: bg, margin, tumour_inv, tumour_lep, tumour_scar)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
