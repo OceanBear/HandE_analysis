@@ -1571,7 +1571,7 @@ def main():
     )
     parser.add_argument(
         '--processed_h5ad_dir',
-        default="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/cn_unified_results_tumor_merged_n=5/processed_h5ad",
+        default="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/cn_unified_results_n=5/processed_h5ad",
         help='Directory containing processed h5ad files with CN annotations'
     )
     parser.add_argument(
@@ -1581,7 +1581,7 @@ def main():
     )
     parser.add_argument(
         '--output_dir',
-        default='/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/cn_unified_results_tumor_merged_n=5/groups',
+        default='/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/cn_unified_results_n=5/groups',
         help='Output directory for group-specific results (relative to script directory)'
     )
     parser.add_argument(

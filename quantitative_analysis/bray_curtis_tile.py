@@ -15,15 +15,26 @@ import seaborn as sns
 from scipy.spatial.distance import pdist, squareform
 from matplotlib.colors import LinearSegmentedColormap
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "neighborhood_composition"))
-from cell_type_config import load_cell_type_config
+from cell_type_utils import DEFAULT_TYPE_INFO_PATH, load_tile_proportions, resolve_cell_type_config
 
 # --------------------------------------------------
 # Defaults (overridden by CLI / bash)
 # --------------------------------------------------
 JSON_DIR = r"/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/json_reclass"
-_CELL_TYPE_DICT, _, _ = load_cell_type_config()
-CELL_TYPES = sorted(_CELL_TYPE_DICT.keys())  # 0–3 as defined by type_info_4class.json
+
+CELL_TYPE_DICT: dict[int, str] = {}
+CELL_TYPE_IDS: list[int] = []
+
+
+def configure_cell_types(type_info_path=None):
+    global CELL_TYPE_DICT, CELL_TYPE_IDS
+    cell_type_dict, _, cell_type_ids, _ = resolve_cell_type_config(type_info_path)
+    CELL_TYPE_DICT = cell_type_dict
+    CELL_TYPE_IDS = cell_type_ids
+    return cell_type_dict, cell_type_ids
+
+
+configure_cell_types()
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -67,22 +78,13 @@ def simplify_tile_name(fname, group_name):
     return name
 
 
-def load_tile_proportions(json_path, min_prob=None):
-    with open(json_path, "r") as f:
-        data = json.load(f)
-
-    counts = {t: 0 for t in CELL_TYPES}
-
-    for nuc in data["nuc"].values():
-        if min_prob is not None and nuc.get("type_prob", 1.0) < min_prob:
-            continue
-        counts[nuc["type"]] += 1
-
-    total = sum(counts.values())
-    if total == 0:
-        return np.zeros(len(CELL_TYPES))
-
-    return np.array([counts[t] / total for t in CELL_TYPES])
+def _tile_proportions(json_path, min_prob=None):
+    return load_tile_proportions(
+        json_path,
+        CELL_TYPE_IDS,
+        CELL_TYPE_DICT,
+        min_prob=min_prob,
+    )
 
 
 def _make_cmap():
@@ -210,7 +212,7 @@ def run(
         if tile_id not in tile_id_to_group:
             continue
         path = os.path.join(json_dir, fname)
-        tile_by_id[tile_id] = (fname, load_tile_proportions(path))
+        tile_by_id[tile_id] = (fname, _tile_proportions(path))
 
     sorted_tile_names = []
     sorted_tile_vectors = []
@@ -340,6 +342,11 @@ def main():
         help="Directory for PNG/CSV outputs.",
     )
     p.add_argument(
+        "--type-info",
+        default=str(DEFAULT_TYPE_INFO_PATH),
+        help="Path to type_info JSON (default: project root type_info_4class.json).",
+    )
+    p.add_argument(
         "--no-per-group",
         action="store_true",
         help="Only overall heatmap (no per-group PNG/CSV).",
@@ -355,6 +362,7 @@ def main():
         help="Do not place group names at cluster midpoints on the overall heatmap (use with --show-tile-names for tile labels).",
     )
     args = p.parse_args()
+    configure_cell_types(args.type_info)
     show_group_axis = not args.no_show_group_names_on_axis
     return run(
         json_dir=args.json_dir,

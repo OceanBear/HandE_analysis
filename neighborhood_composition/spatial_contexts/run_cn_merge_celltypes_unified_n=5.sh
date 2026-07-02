@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Merge epithelium -> tumor in tile h5ads, then unified CN. Edit CONFIG, then: ./run_cn_merge_celltypes_unified.sh
-# Or: ./run_cn_merge_celltypes_unified.sh -- ... (pass-through to Python)
+# Stage tile h5ads (optional cell-type remap) and run unified CN. 4-class default: no remap.
+# Edit CONFIG, then: ./run_cn_merge_celltypes_unified_n=5.sh
+# Or: ./run_cn_merge_celltypes_unified_n=5.sh -- ... (pass-through to Python)
 
 set -euo pipefail
 
 # ========== CONFIG ==========
 SOURCE_TILES_DIR="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/h5ad"
-MERGED_TILES_DIR="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/h5ad_tumor_merged_n=5"
-OUTPUT_DIR="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/cn_unified_results_tumor_merged_n=5"
+MERGED_TILES_DIR="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/h5ad_staged_n=5"
+OUTPUT_DIR="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/cn_unified_results_n=5"
 K=20
 N_CLUSTERS=5
 CELLTYPE_KEY="cell_type"

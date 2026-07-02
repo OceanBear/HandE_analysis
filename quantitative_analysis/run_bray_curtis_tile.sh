@@ -12,6 +12,7 @@ JSON_DIR="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/js
 # Leave empty to use script default (project .../tile_categories_88_tiles.json)
 TILE_CATEGORIES_JSON=""
 OUTPUT_DIR=""
+TYPE_INFO_JSON=""
 # Axis labels: 0 = no tile names (default); 1 = --show-tile-names
 SHOW_TILE_NAMES=0
 # Overall heatmap: 1 = group names at cluster midpoints (default); 0 = --no-show-group-names-on-axis
@@ -21,6 +22,8 @@ SHOW_GROUP_NAMES_ON_AXIS=1
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="${PYTHON:-python3}"
 SCRIPT="${SCRIPT_DIR}/bray_curtis_tile.py"
+DEFAULT_TYPE_INFO="${SCRIPT_DIR}/../type_info_4class.json"
+TYPE_INFO_JSON="${TYPE_INFO_JSON:-${DEFAULT_TYPE_INFO}}"
 
 [[ -f "$SCRIPT" ]] || { echo "Not found: $SCRIPT" >&2; exit 1; }
 
@@ -31,6 +34,7 @@ fi
 args=(--json-dir "$JSON_DIR")
 [[ -n "$TILE_CATEGORIES_JSON" ]] && args+=(--tile-categories-json "$TILE_CATEGORIES_JSON")
 [[ -n "$OUTPUT_DIR" ]] && args+=(--output-dir "$OUTPUT_DIR")
+[[ -f "$TYPE_INFO_JSON" ]] && args+=(--type-info "$TYPE_INFO_JSON")
 [[ "$SHOW_TILE_NAMES" == 1 ]] && args+=(--show-tile-names)
 [[ "$SHOW_GROUP_NAMES_ON_AXIS" == 0 ]] && args+=(--no-show-group-names-on-axis)
 

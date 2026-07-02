@@ -29,7 +29,7 @@ from cti_tiled import (
 
 warnings.filterwarnings('ignore')
 
-# Default epithelium labels (match neighborhood_composition/data_preparation.py)
+# Legacy 7-class epithelium labels (--merge-epithelium only; not used by type_info_4class.json)
 DEFAULT_EPITHELIUM_A = "Epithelium (PD-L1lo/Ki67lo)"
 DEFAULT_EPITHELIUM_B = "Epithelium (PD-L1hi/Ki67hi)"
 

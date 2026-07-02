@@ -11,6 +11,7 @@ Output: CSV files and figures saved to quantitative_analysis/ctd_single/
 """
 
 import json
+import argparse
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,13 +19,15 @@ import matplotlib.patheffects as patheffects
 import seaborn as sns
 from pathlib import Path
 from collections import Counter, defaultdict
-import sys
 import warnings
 
 warnings.filterwarnings('ignore')
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "neighborhood_composition"))
-from cell_type_config import load_cell_type_config
+from cell_type_utils import (
+    DEFAULT_TYPE_INFO_PATH,
+    parse_cell_type_id,
+    resolve_cell_type_config,
+)
 
 # --- Configuration ---
 # ⚠️ Update this path to your specific input JSON file
@@ -40,7 +43,22 @@ CONFIDENCE_THRESHOLD = 0.5
 TILE_AREA_MM2 = 4.0
 
 # Cell type mapping (4-class model: type_info_4class.json)
-CELL_TYPE_DICT, CELL_TYPE_COLORS, _ = load_cell_type_config()
+CELL_TYPE_DICT: dict[int, str] = {}
+CELL_TYPE_COLORS: dict[int, str] = {}
+CELL_TYPE_IDS: list[int] = []
+
+
+def configure_cell_types(type_info_path=None):
+    """Load or reload cell-type names/colors from type_info JSON."""
+    global CELL_TYPE_DICT, CELL_TYPE_COLORS, CELL_TYPE_IDS
+    cell_type_dict, cell_type_colors, cell_type_ids, _ = resolve_cell_type_config(type_info_path)
+    CELL_TYPE_DICT = cell_type_dict
+    CELL_TYPE_COLORS = cell_type_colors
+    CELL_TYPE_IDS = cell_type_ids
+    return cell_type_dict, cell_type_colors, cell_type_ids
+
+
+configure_cell_types()
 
 # Set style for visualizations
 sns.set_style("whitegrid")
@@ -82,7 +100,11 @@ def analyze_single_json(json_path, tile_area_mm2=TILE_AREA_MM2):
     type_probs_by_type = defaultdict(list)
 
     for nucleus_id, nucleus_data in nuclei.items():
-        cell_type = nucleus_data.get('type', 0)
+        cell_type = parse_cell_type_id(
+            nucleus_data.get('type', 0),
+            CELL_TYPE_DICT,
+            context=f" in {json_path}",
+        )
         type_prob = nucleus_data.get('type_prob', 0)
         cell_types.append(cell_type)
         type_probs.append(type_prob)
@@ -176,7 +198,11 @@ def apply_confidence_filter(json_path, threshold=0.5, tile_area_mm2=TILE_AREA_MM
     reclassified_count = 0
 
     for nucleus_id, nucleus_data in nuclei.items():
-        original_type = nucleus_data.get('type', 0)
+        original_type = parse_cell_type_id(
+            nucleus_data.get('type', 0),
+            CELL_TYPE_DICT,
+            context=f" in {json_path}",
+        )
         type_prob = nucleus_data.get('type_prob', 0)
         original_types.append(original_type)
 
@@ -259,9 +285,9 @@ def display_results(results):
     print(f"{'Cell Type':<35} {'Count':>12} {'Proportion':>12} {'Percentage':>10} {'Cells/Tile':>12} {'Cells/mm²':>12}")
     print("─" * 80)
 
-    for cell_type in sorted(results['cell_counts'].keys()):
-        count = results['cell_counts'][cell_type]
-        proportion = results['cell_proportions'][cell_type]
+    for cell_type in CELL_TYPE_IDS:
+        count = results['cell_counts'].get(cell_type, 0)
+        proportion = results['cell_proportions'].get(cell_type, 0)
         percentage = proportion * 100
         type_name = CELL_TYPE_DICT.get(cell_type, f"Unknown ({cell_type})")
         density_per_tile = results.get('cell_density_per_tile', {}).get(cell_type, 0)
@@ -283,7 +309,10 @@ def display_results(results):
         print("\n" + "─" * 80)
         print("Type Probability Statistics by Cell Type")
         print("─" * 80)
-        for cell_type in sorted(results['type_prob_stats_by_type'].keys()):
+        for cell_type in CELL_TYPE_IDS:
+            stats = results['type_prob_stats_by_type'].get(cell_type)
+            if stats is None:
+                continue
             type_name = CELL_TYPE_DICT.get(cell_type, f"Unknown ({cell_type})")
             stats = results['type_prob_stats_by_type'][cell_type]
             print(f"\n{type_name}:")
@@ -297,13 +326,13 @@ def plot_cell_type_distribution(results, output_path=None):
     Create visualizations for cell type distribution (bar chart + pie chart).
     Saves to output_path if provided, otherwise does nothing (no display).
     """
-    if not results['cell_counts']:
+    if results['total_cells'] == 0:
         return
     fig, axes = plt.subplots(1, 2, figsize=(16, 6))
 
-    cell_types = sorted(results['cell_counts'].keys())
+    cell_types = CELL_TYPE_IDS
     cell_names = [CELL_TYPE_DICT.get(ct, f"Type {ct}") for ct in cell_types]
-    counts = [results['cell_counts'][ct] for ct in cell_types]
+    counts = [results['cell_counts'].get(ct, 0) for ct in cell_types]
     colors = [CELL_TYPE_COLORS.get(ct, "#808080") for ct in cell_types]
 
     # Bar plot
@@ -321,17 +350,29 @@ def plot_cell_type_distribution(results, output_path=None):
     def autopct_format(pct):
         return f'{pct:.1f}%' if pct > 3 else ''
 
-    wedges, texts, autotexts = axes[1].pie(
-        counts, labels=None, colors=colors, autopct=autopct_format,
-        startangle=90, textprops={'fontsize': 10, 'weight': 'bold', 'color': 'black'},
-        pctdistance=0.85
-    )
-    for t in autotexts:
-        t.set_color('black')
-        t.set_path_effects([patheffects.withStroke(linewidth=2.5, foreground='white')])
+    pie_types = [ct for ct, count in zip(cell_types, counts) if count > 0]
+    pie_names = [CELL_TYPE_DICT.get(ct, f"Type {ct}") for ct in pie_types]
+    pie_counts = [results['cell_counts'].get(ct, 0) for ct in pie_types]
+    pie_colors = [CELL_TYPE_COLORS.get(ct, "#808080") for ct in pie_types]
 
-    legend_labels = [f'{name}: {count:,} ({count/sum(counts)*100:.1f}%)' for name, count in zip(cell_names, counts)]
-    axes[1].legend(wedges, legend_labels, title="Cell Types", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1), fontsize=9)
+    if pie_counts:
+        wedges, texts, autotexts = axes[1].pie(
+            pie_counts, labels=None, colors=pie_colors, autopct=autopct_format,
+            startangle=90, textprops={'fontsize': 10, 'weight': 'bold', 'color': 'black'},
+            pctdistance=0.85
+        )
+        for t in autotexts:
+            t.set_color('black')
+            t.set_path_effects([patheffects.withStroke(linewidth=2.5, foreground='white')])
+
+        legend_labels = [
+            f'{name}: {count:,} ({count / sum(pie_counts) * 100:.1f}%)'
+            for name, count in zip(pie_names, pie_counts)
+        ]
+        axes[1].legend(wedges, legend_labels, title="Cell Types", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1), fontsize=9)
+    else:
+        axes[1].text(0.5, 0.5, 'No cells detected', ha='center', va='center', fontsize=12)
+        axes[1].set_axis_off()
     axes[1].set_title(f'Cell Type Proportions\n{results["filename"]}', fontsize=14, fontweight='bold')
 
     plt.tight_layout()
@@ -349,7 +390,10 @@ def plot_type_probability_distribution(results, output_path=None):
         return
     fig, ax = plt.subplots(figsize=(14, 6))
 
-    cell_types = sorted(results['type_prob_stats_by_type'].keys())
+    cell_types = [
+        ct for ct in CELL_TYPE_IDS
+        if ct in results['type_prob_stats_by_type']
+    ]
     cell_names = [CELL_TYPE_DICT.get(ct, f"Type {ct}") for ct in cell_types]
     means = [results['type_prob_stats_by_type'][ct]['mean'] for ct in cell_types]
     stds = [results['type_prob_stats_by_type'][ct]['std'] for ct in cell_types]
@@ -388,11 +432,13 @@ def plot_type_probability_distribution(results, output_path=None):
 def export_results_to_csv(results, output_path, is_filtered=False):
     """Export analysis results to CSV file."""
     data_rows = []
-    for cell_type in sorted(results['cell_counts'].keys()):
+    for cell_type in CELL_TYPE_IDS:
+        stats = results['type_prob_stats_by_type'].get(cell_type)
+        if stats is None:
+            continue
         type_name = CELL_TYPE_DICT.get(cell_type, f"Type {cell_type}")
-        count = results['cell_counts'][cell_type]
-        proportion = results['cell_proportions'][cell_type]
-        stats = results['type_prob_stats_by_type'][cell_type]
+        count = results['cell_counts'].get(cell_type, 0)
+        proportion = results['cell_proportions'].get(cell_type, 0)
         density_per_tile = results.get('cell_density_per_tile', {}).get(cell_type, 0)
         density_per_mm2 = results.get('cell_density_per_mm2', {}).get(cell_type, 0)
 
@@ -452,7 +498,11 @@ def extract_confidence_by_type(json_path, threshold=None):
 
     probs_by_type = defaultdict(list)
     for nucleus_id, nucleus_data in nuclei.items():
-        cell_type = nucleus_data.get('type', 0)
+        cell_type = parse_cell_type_id(
+            nucleus_data.get('type', 0),
+            CELL_TYPE_DICT,
+            context=f" in {json_path}",
+        )
         type_prob = nucleus_data.get('type_prob', 0)
         if threshold is not None and type_prob < threshold and cell_type != 0:
             cell_type = 0  # Reclassify as Others
@@ -475,7 +525,7 @@ def plot_confidence_distribution(probs_by_type, output_path, filename):
     if not probs_by_type:
         return
 
-    cell_types = sorted(probs_by_type.keys())
+    cell_types = [ct for ct in CELL_TYPE_IDS if ct in probs_by_type]
     n_types = len(cell_types)
     n_rows = 2
     n_cols = (n_types + n_rows - 1) // n_rows
@@ -527,7 +577,7 @@ def export_confidence_distribution_to_csv(probs_by_type, output_path, filename):
     bin_edges = list(zip(bins[:-1], bins[1:]))
 
     data_rows = []
-    for cell_type in sorted(probs_by_type.keys()):
+    for cell_type in [ct for ct in CELL_TYPE_IDS if ct in probs_by_type]:
         probs = np.array(probs_by_type[cell_type])
         type_name = CELL_TYPE_DICT.get(cell_type, f"Type {cell_type}")
         total = len(probs)
@@ -557,9 +607,9 @@ def export_confidence_distribution_to_csv(probs_by_type, output_path, filename):
 def export_density_summary_to_csv(results, output_path, is_filtered=False):
     """Export cell density metrics (cells/tile and cells/mm²) by cell type to CSV."""
     data_rows = []
-    for cell_type in sorted(results['cell_counts'].keys()):
+    for cell_type in CELL_TYPE_IDS:
         type_name = CELL_TYPE_DICT.get(cell_type, f"Type {cell_type}")
-        count = results['cell_counts'][cell_type]
+        count = results['cell_counts'].get(cell_type, 0)
         density_per_tile = results.get('cell_density_per_tile', {}).get(cell_type, 0)
         density_per_mm2 = results.get('cell_density_per_mm2', {}).get(cell_type, 0)
         row_data = {
@@ -588,26 +638,61 @@ def export_density_summary_to_csv(results, output_path, is_filtered=False):
     return df
 
 
+def _parse_args():
+    parser = argparse.ArgumentParser(
+        description="Analyze cell-type distribution for one NucSegAI JSON tile."
+    )
+    parser.add_argument("--json", type=str, default=INPUT_FILE, help="Path to input JSON file.")
+    parser.add_argument("--output-dir", type=str, default=str(OUTPUT_DIR), help="Output directory.")
+    parser.add_argument(
+        "--type-info",
+        type=str,
+        default=str(DEFAULT_TYPE_INFO_PATH),
+        help="Path to type_info JSON (default: project root type_info_4class.json).",
+    )
+    parser.add_argument(
+        "--confidence-threshold",
+        type=float,
+        default=CONFIDENCE_THRESHOLD,
+        help="Reclassify low-confidence cells as Others (type 0).",
+    )
+    parser.add_argument(
+        "--tile-area-mm2",
+        type=float,
+        default=TILE_AREA_MM2,
+        help="Tile area in mm² for density calculations.",
+    )
+    return parser.parse_args()
+
+
 def main():
-    output_dir = Path(OUTPUT_DIR)
+    args = _parse_args()
+    configure_cell_types(args.type_info)
+
+    output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    json_path = Path(INPUT_FILE)
+    json_path = Path(args.json)
     if not json_path.exists():
-        print(f"❌ Error: File not found at {INPUT_FILE}")
-        print("Please update the INPUT_FILE variable with the correct path.")
+        print(f"❌ Error: File not found at {json_path}")
+        print("Please pass --json PATH or update INPUT_FILE in the script.")
         return
 
-    print(f"✅ File found: {INPUT_FILE}")
+    confidence_threshold = args.confidence_threshold
+    tile_area_mm2 = args.tile_area_mm2
+
+    print(f"✅ File found: {json_path}")
     print(f"📁 Output directory: {output_dir}\n")
 
     # Step 1: Analyze unfiltered
-    results = analyze_single_json(json_path)
+    results = analyze_single_json(json_path, tile_area_mm2=tile_area_mm2)
     print("📊 Unfiltered analysis complete")
 
     # Step 2: Apply confidence filter
-    filtered_results = apply_confidence_filter(json_path, threshold=CONFIDENCE_THRESHOLD)
-    print(f"📊 Filtered analysis complete (threshold={CONFIDENCE_THRESHOLD})")
+    filtered_results = apply_confidence_filter(
+        json_path, threshold=confidence_threshold, tile_area_mm2=tile_area_mm2
+    )
+    print(f"📊 Filtered analysis complete (threshold={confidence_threshold})")
     print(f"   Reclassified {filtered_results['reclassified_count']:,} cells as Others\n")
 
     # Step 3: Display results
@@ -633,15 +718,25 @@ def main():
         print("   ✅ confidence_distribution_by_cell_type_unfiltered.png")
         print("   ✅ confidence_distribution_by_cell_type_unfiltered.csv")
 
-    filename_filtered, probs_by_type_filtered = extract_confidence_by_type(json_path, threshold=CONFIDENCE_THRESHOLD)
+    filename_filtered, probs_by_type_filtered = extract_confidence_by_type(
+        json_path, threshold=confidence_threshold
+    )
     if probs_by_type_filtered:
-        plot_confidence_distribution(probs_by_type_filtered, output_dir / f"confidence_distribution_by_cell_type_filtered_{int(CONFIDENCE_THRESHOLD*100)}.png", filename_filtered)
-        export_confidence_distribution_to_csv(probs_by_type_filtered, output_dir / f"confidence_distribution_by_cell_type_filtered_{int(CONFIDENCE_THRESHOLD*100)}.csv", filename_filtered)
-        print(f"   ✅ confidence_distribution_by_cell_type_filtered_{int(CONFIDENCE_THRESHOLD*100)}.png")
-        print(f"   ✅ confidence_distribution_by_cell_type_filtered_{int(CONFIDENCE_THRESHOLD*100)}.csv")
+        plot_confidence_distribution(
+            probs_by_type_filtered,
+            output_dir / f"confidence_distribution_by_cell_type_filtered_{int(confidence_threshold * 100)}.png",
+            filename_filtered,
+        )
+        export_confidence_distribution_to_csv(
+            probs_by_type_filtered,
+            output_dir / f"confidence_distribution_by_cell_type_filtered_{int(confidence_threshold * 100)}.csv",
+            filename_filtered,
+        )
+        print(f"   ✅ confidence_distribution_by_cell_type_filtered_{int(confidence_threshold * 100)}.png")
+        print(f"   ✅ confidence_distribution_by_cell_type_filtered_{int(confidence_threshold * 100)}.csv")
 
     # Step 5: Export CSV files
-    threshold_str = str(int(CONFIDENCE_THRESHOLD * 100))
+    threshold_str = str(int(confidence_threshold * 100))
     print("\n📁 Exporting CSV files...")
     export_results_to_csv(results, output_dir / "cell_analysis_unfiltered.csv", is_filtered=False)
     export_results_to_csv(filtered_results, output_dir / f"cell_analysis_filtered_{threshold_str}.csv", is_filtered=True)

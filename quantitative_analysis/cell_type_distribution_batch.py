@@ -7,6 +7,7 @@ and produces the same output as the notebook's batch analysis.
 Output: CSV files and figures saved to quantitative_analysis/ctd_batch/
 """
 
+import argparse
 import numpy as np
 from pathlib import Path
 from collections import Counter, defaultdict
@@ -15,6 +16,7 @@ from collections import Counter, defaultdict
 from cell_type_distribution_single import (
     analyze_single_json,
     apply_confidence_filter,
+    configure_cell_types,
     display_results,
     plot_cell_type_distribution,
     plot_type_probability_distribution,
@@ -25,6 +27,7 @@ from cell_type_distribution_single import (
     export_confidence_distribution_to_csv,
     TILE_AREA_MM2,
 )
+from cell_type_utils import DEFAULT_TYPE_INFO_PATH
 
 # --- Configuration ---
 # ⚠️ Update this path to your directory containing JSON files
@@ -251,11 +254,43 @@ def aggregate_confidence_by_type(json_files, threshold=None):
     return filename, dict(probs_by_type)
 
 
+def _parse_args():
+    parser = argparse.ArgumentParser(
+        description="Batch cell-type distribution analysis for NucSegAI JSON tiles."
+    )
+    parser.add_argument("--input-dir", type=str, default=INPUT_DIR, help="Directory of JSON files.")
+    parser.add_argument("--output-dir", type=str, default=str(OUTPUT_DIR), help="Output directory.")
+    parser.add_argument(
+        "--type-info",
+        type=str,
+        default=str(DEFAULT_TYPE_INFO_PATH),
+        help="Path to type_info JSON (default: project root type_info_4class.json).",
+    )
+    parser.add_argument(
+        "--confidence-threshold",
+        type=float,
+        default=CONFIDENCE_THRESHOLD,
+        help="Reclassify low-confidence cells as Others (type 0).",
+    )
+    parser.add_argument(
+        "--tile-area-mm2",
+        type=float,
+        default=TILE_AREA_MM2,
+        help="Tile area in mm² for density calculations.",
+    )
+    return parser.parse_args()
+
+
 def main():
-    output_dir = Path(OUTPUT_DIR)
+    args = _parse_args()
+    configure_cell_types(args.type_info)
+
+    output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    input_path = Path(INPUT_DIR)
+    input_path = Path(args.input_dir)
+    confidence_threshold = args.confidence_threshold
+    tile_area_mm2 = args.tile_area_mm2
     if input_path.is_file():
         input_path = input_path.parent
     if not input_path.exists():
@@ -264,15 +299,20 @@ def main():
 
     print(f"📁 Input directory: {input_path}")
     print(f"📁 Output directory: {output_dir}")
-    print(f"📊 Confidence threshold: {CONFIDENCE_THRESHOLD}\n")
+    print(f"📊 Confidence threshold: {confidence_threshold}\n")
 
     # Analyze unfiltered
-    all_results = analyze_multiple_json_files(input_path, apply_filter=False)
+    all_results = analyze_multiple_json_files(
+        input_path, apply_filter=False, tile_area_mm2=tile_area_mm2
+    )
     aggregated_unfiltered = aggregate_results(all_results, is_filtered=False)
 
     # Analyze filtered
     filtered_results = analyze_multiple_json_files(
-        input_path, apply_filter=True, threshold=CONFIDENCE_THRESHOLD
+        input_path,
+        apply_filter=True,
+        threshold=confidence_threshold,
+        tile_area_mm2=tile_area_mm2,
     )
     aggregated_filtered = aggregate_results(filtered_results, is_filtered=True)
 
@@ -306,15 +346,25 @@ def main():
             print("   ✅ confidence_distribution_by_cell_type_unfiltered.png")
             print("   ✅ confidence_distribution_by_cell_type_unfiltered.csv")
 
-        filename_filt, probs_filt = aggregate_confidence_by_type(json_files, threshold=CONFIDENCE_THRESHOLD)
+        filename_filt, probs_filt = aggregate_confidence_by_type(
+            json_files, threshold=confidence_threshold
+        )
         if probs_filt:
-            plot_confidence_distribution(probs_filt, output_dir / f"confidence_distribution_by_cell_type_filtered_{int(CONFIDENCE_THRESHOLD*100)}.png", filename_filt)
-            export_confidence_distribution_to_csv(probs_filt, output_dir / f"confidence_distribution_by_cell_type_filtered_{int(CONFIDENCE_THRESHOLD*100)}.csv", filename_filt)
-            print(f"   ✅ confidence_distribution_by_cell_type_filtered_{int(CONFIDENCE_THRESHOLD*100)}.png")
-            print(f"   ✅ confidence_distribution_by_cell_type_filtered_{int(CONFIDENCE_THRESHOLD*100)}.csv")
+            plot_confidence_distribution(
+                probs_filt,
+                output_dir / f"confidence_distribution_by_cell_type_filtered_{int(confidence_threshold * 100)}.png",
+                filename_filt,
+            )
+            export_confidence_distribution_to_csv(
+                probs_filt,
+                output_dir / f"confidence_distribution_by_cell_type_filtered_{int(confidence_threshold * 100)}.csv",
+                filename_filt,
+            )
+            print(f"   ✅ confidence_distribution_by_cell_type_filtered_{int(confidence_threshold * 100)}.png")
+            print(f"   ✅ confidence_distribution_by_cell_type_filtered_{int(confidence_threshold * 100)}.csv")
 
     # Export CSV files
-    threshold_str = str(int(CONFIDENCE_THRESHOLD * 100))
+    threshold_str = str(int(confidence_threshold * 100))
     print("\n📁 Exporting CSV files...")
     export_results_to_csv(
         aggregated_unfiltered,

@@ -667,7 +667,7 @@ def aggregate_from_saved_results(
     n_perms=None,
     n_neighbors=None,
     *,
-    merge_epithelium_to_tumor=True,
+    merge_epithelium_to_tumor=False,
     tumor_label="Tumor",
     cti_heatmap_annot_fontsize=32,
     use_short_cell_type_labels_in_plots=True,
@@ -695,8 +695,8 @@ def aggregate_from_saved_results(
         Number of permutations used in CTI analysis (for display in plot title)
     n_neighbors : int, optional
         Number of neighbors used in spatial graph (for display in plot title)
-    merge_epithelium_to_tumor : bool, default=True
-        Merge the two default epithelium cell types into ``tumor_label`` per tile before alignment.
+    merge_epithelium_to_tumor : bool, default=False
+        Merge legacy 7-class epithelium labels into ``tumor_label`` per tile before alignment.
     tumor_label : str, default='Tumor'
         Label for merged epithelium block.
     cti_heatmap_annot_fontsize : float, default=12

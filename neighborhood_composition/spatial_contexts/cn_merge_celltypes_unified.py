@@ -180,7 +180,7 @@ def main() -> int:
         "--output_dir",
         type=str,
         required=True,
-        help="Unified CN results directory (e.g. cn_unified_results_Tumor_merged).",
+        help="Unified CN results directory (e.g. cn_unified_results_n=5).",
     )
     p.add_argument(
         "--merge_map_json",
@@ -192,7 +192,7 @@ def main() -> int:
         "--category_order_json",
         type=str,
         default=None,
-        help="JSON array of category names after merge. Default: 6-type order in script.",
+        help="JSON array of category names after merge. Default: 4-type order in script.",
     )
     p.add_argument("--celltype_key", type=str, default="cell_type", help="obs column for cell types.")
     p.add_argument("--k", type=int, default=20, help="KNN k (same as cn_unified_kmeans).")

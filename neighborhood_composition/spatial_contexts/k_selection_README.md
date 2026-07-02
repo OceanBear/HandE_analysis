@@ -223,8 +223,8 @@ Then:
 
 **Example**
 
-- CN1: 73 % Epithelium (PD‑L1\(^\text{hi}\)/Ki67\(^\text{hi}\)) → **interpretable** (counted).
-- CN2: 49 % Epithelium (PD‑L1\(^\text{lo}\)/Ki67\(^\text{lo}\)), 22 % Epithelium (PD‑L1\(^\text{hi}\)/Ki67\(^\text{hi}\)) → **not** counted (no single type \(\gt 50\%\)).
+- CN1: 73 % Tumor → **interpretable** (counted).
+- CN2: 49 % Lymphocyte, 22 % Tumor → **not** counted (no single type \(\gt 50\%\)).
 
 ---
 
