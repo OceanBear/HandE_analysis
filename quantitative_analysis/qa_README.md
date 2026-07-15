@@ -35,7 +35,7 @@ Tile tissue groups for Bray–Curtis follow
 
 Aggregate cell counts, proportions, densities, and type-probability / confidence summaries over **all** JSON tiles in a directory. Writes CSVs and figures under `ctd_batch/` (or `--output-dir`).
 
-Also produces a **confidence-filtered** series (low-confidence cells reclassified as Others) using `--confidence-threshold` (default `0.5`). Filtered figures/CSVs are generated but not shown below.
+Also produces a **confidence-filtered** series (low-confidence cells reclassified as Others) using `--confidence-threshold` (default `0.5`).
 
 **Example:**
 
@@ -68,12 +68,7 @@ python cell_type_distribution_batch.py \
 
 ### Filtered outputs (not shown)
 
-The same scripts also write filtered counterparts when a confidence threshold is applied, for example:
-
-- `ctd_batch/cell_type_distribution_filtered.png`
-- `ctd_batch/type_probability_by_cell_type_filtered.png`
-- `ctd_batch/confidence_distribution_by_cell_type_filtered_50.png`
-- matching CSVs (`batch_aggregated_filtered_*.csv`, density and confidence CSVs)
+The same scripts also write filtered counterparts when a confidence threshold (usually 0.5) is applied.
 
 
 

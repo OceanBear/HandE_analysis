@@ -108,6 +108,10 @@ cti_multiple_tiles/
     ...
 ```
 
+### Example per-tile result
+
+![Example tile CTI heatmap](example_pic/JN_TS_003_tumour_inv_tile_13315_8127_cti.png)
+
 Then aggregate:
 
 ```bash
@@ -123,11 +127,8 @@ python cti_aggregate.py --input_dir cti_multiple_tiles --n_perms 1000 --n_neighb
 Reads all per-tile folders under `--input_dir` and produces:
 
 - Mean / std / median CTI z-score matrices and heatmaps
-- Optional Schapiro-style summed significance (`sigval`) across tiles
 - Interaction consistency tables
 - Per-tile summary CSV
-
-For the **4-class** model, leave epithelium merge **off** (default). Use `--merge-epithelium` only for old 7-class outputs that still have split epithelium labels.
 
 **Example:**
 
@@ -142,26 +143,31 @@ python cti_aggregate.py \
 
 **Useful options:**
 
-
 | Flag                          | Meaning                                                |
 | ----------------------------- | ------------------------------------------------------ |
 | `--input_dir`                 | Batch output directory (default: `cti_multiple_tiles`) |
 | `--n_perms` / `--n_neighbors` | Shown in plot titles (match what you used in batch)    |
 | `--no-short-cell-type-labels` | Use full names on heatmap axes                         |
-| `--no-schapiro-sum`           | Disable summed `sigval` heatmap/CSV                    |
-| `--merge-epithelium`          | Legacy only: merge two epithelium types → Tumor        |
 | `--heatmap-annot-fontsize`    | Font size for numbers inside heatmaps                  |
-
 
 **Key outputs (written into** `--input_dir`**):**
 
 - `aggregated_mean_cti.png` / `aggregated_mean_zscore.csv`
 - `aggregated_variability.png` / `aggregated_std_zscore.csv`
 - `aggregated_median_zscore.csv`
-- `aggregated_summed_sigval.png` / `.csv` (unless disabled)
 - `all_tiles_interactions.csv`
 - `interaction_consistency.csv`
 - `tiles_summary.csv`
+
+### Example aggregated results
+
+**Mean CTI across tiles**
+
+![Aggregated mean CTI](example_pic/aggregated_mean_cti.png)
+
+**CTI variability (std) across tiles**
+
+![Aggregated CTI variability](example_pic/aggregated_variability.png)
 
 ---
 
@@ -189,7 +195,7 @@ python cti_aggregate.py \
 
 ## Notes
 
+- Relative image paths assume this README lives in `cell_type_interaction/` next to `example_pic/`.
 - Scripts `chdir` to this folder when started; relative output paths are relative to `cell_type_interaction/`.
 - Batch graph method follows `cti_tiled`’s pipeline defaults (k-NN with `n_neighbors`; radius is kept for compatibility / titles).
 - Prefer focusing on interactions that appear consistently across many tiles (`interaction_consistency.csv`).
-

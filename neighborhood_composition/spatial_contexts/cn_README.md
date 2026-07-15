@@ -1,24 +1,20 @@
 # Spatial Contexts & Cellular Neighborhoods (CN)
 
-Scripts for **unified cellular neighborhood (CN)** detection across HandE tiles, visualization by tissue group, sub-clustering, and optional **spatial context (SC)** detection on top of CNs.
+Scripts for **unified cellular neighborhood (CN)** detection across HandE tiles, visualization by tissue group, and optional sub-clustering of selected CNs.
 
 Inputs are per-tile `.h5ad` files from `neighborhood_composition/data_preparation.py` (4-class labels: Others, Tumor, Lymphocyte, Fibroblast/Stroma).
 
 ---
 
-## Suggested pipeline (most important → supporting)
+## Suggested pipeline
 
 ```text
 h5ad tiles
   ├─► cn_unified_kmeans.py              # 1. define shared CNs (core)
   │     └─► cn_unified_kmeans_groups.py # 2. figures / tile-group analysis
   │
-  ├─► cn_subcluster.py                  # 3. refine selected CNs
-  ├─► cn_by_group_barcharts.py          # 4. CN × tissue-group bars
-  │
-  ├─► spatial_contexts_unified.py       # 5. CN mixtures → spatial contexts
-  │
-  └─► cn_merge_celltypes_unified.py     # optional: remap types then re-run CN
+  └─► cn_subcluster.py                  # 3. refine selected CNs
+        └─► cn_unified_kmeans_groups.py # re-plot with --cn_key cn_celltype_sub
 ```
 
 Supporting data: `tile_categories_88_tiles.json` (tile → group: `bg`, `margin`, `tumour_inv`, …).
@@ -40,7 +36,7 @@ python cn_unified_kmeans.py \
   --tiles_dir "/path/to/pred/h5ad" \
   --output_dir "cn_unified_results" \
   --k 20 \
-  --n_clusters 5 \
+  --n_clusters 4 \
   --celltype_key cell_type
 ```
 
@@ -67,17 +63,43 @@ Reads CN-annotated h5ads and produces:
 
 ```bash
 python cn_unified_kmeans_groups.py \
-  --processed_h5ad_dir "/path/to/cn_unified_results_n=5/processed_h5ad" \
+  --processed_h5ad_dir "/path/to/cn_unified_results_n=4/processed_h5ad" \
   --categories_json "tile_categories_88_tiles.json" \
-  --output_dir "/path/to/cn_unified_results_n=5/groups" \
+  --output_dir "/path/to/cn_unified_results_n=4/groups" \
   --cn_key cn_celltype \
   --k 20 \
-  --n_clusters 5
+  --n_clusters 4
 ```
 
 For sub-clustered results, use `--cn_key cn_celltype_sub` (auto-set if the path contains `_sub`).
 
 **Optional:** `--group margin` (one group only), `--no-generate_unified`, `--no-generate_individual`.
+
+### Example results
+
+**CN composition heatmap**
+
+![CN composition heatmap](example_pic/unified_cn_composition_heatmap.png)
+
+**Overall CN frequency**
+
+![Overall CN frequency](example_pic/neighborhood_frequency_overall.png)
+
+**Per-tile CN frequency (all groups)**
+
+![Per-tile CN frequency](example_pic/neighborhood_frequency_per_tile_all_groups.png)
+
+**Individual tile spatial CN map (tile example)**
+
+![Spatial CNs on one tile](example_pic/spatial_cns_JN_TS_002_margin_tile_14477_11069.png)
+
+**Group-specific frequency (**`bg, 17 tiles combined`**)**
+
+![CN frequency for bg group](example_pic/neighborhood_frequency_bg.png)
+
+**Cell-fraction difference vs overall (**`bg, 17 tiles combined`**)**
+
+![Cell fraction difference bg](example_pic/cell_fraction_difference_bg.png)
 
 ---
 
@@ -92,90 +114,23 @@ Partitions cells from chosen parent CNs into non-overlapping child CNs using nei
 ```bash
 python cn_subcluster.py \
   --results_root "/path/to/cn_unified_results" \
-  --n_clusters 5 \
-  --subcluster_config "3:2,4:2"
+  --n_clusters 4 \
+  --subcluster_config "2:2,3:2"
 ```
 
-Writes `all_n_cluster=5_sub/` with updated `processed_h5ad/`, `unified_cn_composition_sub.csv`, and `subcluster_config.json`. Labels go in `obs['cn_celltype_sub']`.
+Writes `all_n_cluster=4_sub/` with updated `processed_h5ad/`, `unified_cn_composition_sub.csv`, and `subcluster_config.json`. Labels go in `obs['cn_celltype_sub']`.
 
----
+Re-run `cn_unified_kmeans_groups.py` on the `_sub` `processed_h5ad` (with `--cn_key cn_celltype_sub`) to refresh figures.
 
+### Example results (after subclustering)
 
+**CN composition heatmap (sub)**
 
-## 4. `cn_by_group_barcharts.py` — **CN × tissue-group bars**
+![CN composition heatmap after subclustering](example_pic/unified_cn_composition_heatmap_sub.png)
 
-For each `k` (and optionally sub-clustered folders), builds two stacked bars:
+**Overall CN frequency (sub)**
 
-1. Within each CN — how cells distribute across tile groups
-2. Within each tile group — how cells distribute across CNs
-
-Only tiles listed in the categories JSON are included.
-
-**Example:**
-
-```bash
-python cn_by_group_barcharts.py \
-  --results_root "/path/to/cn_unified_results" \
-  --categories_json "tile_categories_88_tiles.json" \
-  --out_dir "/path/to/cn_unified_results/k_selection" \
-  --k_min 4 \
-  --k_max 13 \
-  --include_sub \
-  --save_csv
-```
-
-**Outputs:** `cn_by_group_barcharts_<k>.png` (and optional CSVs).
-
----
-
-
-
-## 5. `spatial_contexts_unified.py` — **spatial contexts from CNs**
-
-Builds higher-order **spatial contexts (SCs)** from local mixtures of CNs (neighbor graph over CN-labeled cells), then filters rare / low-occupancy SCs and writes maps / interaction graphs.
-
-Requires CN results from `cn_unified_kmeans.py` (`*_adata_cns.h5ad` under `processed_h5ad/`).
-
-**Example:**
-
-```bash
-python spatial_contexts_unified.py \
-  --cn_results_dir "cn_unified_results" \
-  --output_dir "sc_unified_results" \
-  --k 40 \
-  --threshold 0.9 \
-  --min_fraction 0.1 \
-  --min_cells 100 \
-  --min_groups 1
-```
-
-**Useful flags:** `--coord_offset`, `--graph_layout spring|kamada_kawai|circular`.
-
----
-
-
-
-## 6. `cn_merge_celltypes_unified.py` — **optional remap + re-run CN**
-
-Two phases:
-
-- **A** — copy tiles to a new folder, optionally remapping cell-type labels
-- **B** — run unified CN on that folder
-
-For the **4-class** model the default merge map is empty (identity copy). Use `--merge_map_json` only if you need remapping (e.g. legacy labels).
-
-**Example:**
-
-```bash
-python cn_merge_celltypes_unified.py \
-  --source_tiles_dir "/path/to/pred/h5ad" \
-  --merged_tiles_dir "/path/to/h5ad_staged_n=5" \
-  --output_dir "/path/to/cn_unified_results_n=5" \
-  --k 20 \
-  --n_clusters 5
-```
-
-Skip Phase A if staging is already done: `--skip_phase_a`. Force remapping with `--merge_map_json map.json`.
+![Overall CN frequency after subclustering](example_pic/neighborhood_frequency_overall_sub.png)
 
 ---
 
@@ -189,23 +144,29 @@ cd neighborhood_composition/spatial_contexts
 # 1) Detect CNs (shared labels across tiles)
 python cn_unified_kmeans.py \
   --tiles_dir "/path/to/pred/h5ad" \
-  --output_dir "cn_unified_results_n=5" \
-  --n_clusters 5 --k 20
+  --output_dir "cn_unified_results_n=4" \
+  --n_clusters 4 --k 20
 
 # 2) Visualize (+ tissue groups)
 python cn_unified_kmeans_groups.py \
-  --processed_h5ad_dir "cn_unified_results_n=5/processed_h5ad" \
+  --processed_h5ad_dir "cn_unified_results_n=4/processed_h5ad" \
   --categories_json "tile_categories_88_tiles.json" \
-  --output_dir "cn_unified_results_n=5/groups" \
-  --n_clusters 5
+  --output_dir "cn_unified_results_n=4/groups" \
+  --n_clusters 4
 
-# 3) Optional: spatial contexts
-python spatial_contexts_unified.py \
-  --cn_results_dir "cn_unified_results_n=5" \
-  --output_dir "sc_unified_results_n=5"
+# 3) Optional: subcluster selected CNs, then re-plot
+python cn_subcluster.py \
+  --results_root "cn_unified_results" \
+  --n_clusters 4 \
+  --subcluster_config "2:2,3:2"
+
+python cn_unified_kmeans_groups.py \
+  --processed_h5ad_dir "cn_unified_results/all_n_cluster=4_sub/processed_h5ad" \
+  --categories_json "tile_categories_88_tiles.json" \
+  --output_dir "cn_unified_results/all_n_cluster=4_sub/groups" \
+  --cn_key cn_celltype_sub \
+  --n_clusters 4
 ```
-
-Optional follow-ups: `cn_subcluster.py` to refine selected CNs, or `cn_by_group_barcharts.py` to compare CNs across tissue groups (run unified CN for several `n_clusters` first if you want multiple `k` charts).
 
 ---
 
@@ -213,6 +174,6 @@ Optional follow-ups: `cn_subcluster.py` to refine selected CNs, or `cn_by_group_
 
 ## Notes
 
+- Relative image paths assume this README lives in `spatial_contexts/` next to `example_pic/`.
 - Several scripts `chdir` to this folder; relative paths are relative to `spatial_contexts/`.
 - Cell-type abbreviation / order for heatmaps assumes the 4-class names from `type_info_4class.json`.
-
