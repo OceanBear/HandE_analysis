@@ -8,11 +8,11 @@
 set -euo pipefail
 
 # ========== CONFIG ==========
-JSON_DIR="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/json_reclass"
+JSON_DIR="${JSON_DIR:-/mnt/j/HandE/results/Final/pred/json}"
 # Leave empty to use script default (project .../tile_categories_88_tiles.json)
 TILE_CATEGORIES_JSON=""
 OUTPUT_DIR=""
-TYPE_INFO_JSON=""
+TYPE_INFO_JSON="${TYPE_INFO_JSON:-/home/qxiong/projects/HandE_analysis/type_info_4class.json}"
 # Axis labels: 0 = no tile names (default); 1 = --show-tile-names
 SHOW_TILE_NAMES=0
 # Overall heatmap: 1 = group names at cluster midpoints (default); 0 = --no-show-group-names-on-axis

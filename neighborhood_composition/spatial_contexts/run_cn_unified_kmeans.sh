@@ -5,10 +5,10 @@
 set -euo pipefail
 
 # ========== CONFIG ==========
-TILES_DIR="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/h5ad"
+TILES_DIR="/mnt/j/HandE/results/Final/pred/h5ad_selected"
 OUTPUT_DIR="cn_unified_results"
 K=20
-N_CLUSTERS=5
+N_CLUSTERS=4
 CELLTYPE_KEY="cell_type"
 PATTERN="*.h5ad"
 MAX_TILES=""       # e.g. 3 for testing; empty = all tiles

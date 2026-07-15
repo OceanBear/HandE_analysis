@@ -89,7 +89,7 @@ def standardize_sc_label(sc_label: str) -> str:
     ---------
     >>> standardize_sc_label('6_5_3_2')
     '2_3_5_6'
-    >>> standardize_sc_label('2_6_3_5')
+    >>>  ('2_6_3_5')
     '2_3_5_6'
     >>> standardize_sc_label('1')
     '1'

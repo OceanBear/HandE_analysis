@@ -19,7 +19,7 @@ from cell_type_utils import DEFAULT_TYPE_INFO_PATH, load_tile_proportions, resol
 # --------------------------------------------------
 # Config
 # --------------------------------------------------
-JSON_DIR = r"/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/json_reclass"
+JSON_DIR = r"/mnt/j/HandE/results/Final/pred/json_selected"
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -43,30 +43,38 @@ SHOW_TILE_NAMES = True
 SHOW_GROUP_NAMES_ONLY = False
 SHOW_BC_VALUES = True
 
+# Tile filename may still contain tumour_scar; category groups match tile_categories JSON.
+_TILE_GROUP_TOKEN_RE = r"(tumour_inv|tumour_lep|bg|margin|tumour_scar)"
+_GROUP_ALIAS = {"tumour_scar": "tumour_lep"}
+
 
 def extract_case_id(tile_id):
     """Example: JN_TS_001_tumour_inv_tile_10912_14661 -> JN_TS_001"""
-    match = re.match(r"(.+?)_(tumour_inv|tumour_lep|bg|margin|tumour_scar)_tile_", tile_id)
+    match = re.match(rf"(.+?)_{_TILE_GROUP_TOKEN_RE}_tile_", tile_id)
     if match:
         return match.group(1)
     return None
 
 
 def extract_group_name(tile_id):
-    """Example: JN_TS_001_tumour_inv_tile_10912_14661 -> tumour_inv"""
-    match = re.match(r".+?_(tumour_inv|tumour_lep|bg|margin|tumour_scar)_tile_", tile_id)
+    """
+    Example: JN_TS_001_tumour_inv_tile_10912_14661 -> tumour_inv
+
+    Legacy filenames with tumour_scar map to tumour_lep (group removed from categories).
+    """
+    match = re.match(rf".+?_{_TILE_GROUP_TOKEN_RE}_tile_", tile_id)
     if match:
-        return match.group(1)
+        raw = match.group(1)
+        return _GROUP_ALIAS.get(raw, raw)
     return None
 
 
 def simplify_tile_name(fname, group_name):
     """Example: JN_TS_010_tumour_inv_tile_11151_13664.json -> 11151_13664_tumour_inv"""
     name = fname.replace(".json", "")
-    pattern = f".+?_{group_name}_tile_(\\d+_\\d+)"
-    match = re.match(pattern, name)
+    match = re.match(rf".+?_{_TILE_GROUP_TOKEN_RE}_tile_(\\d+_\\d+)", name)
     if match:
-        numbers = match.group(1)
+        numbers = match.group(2)
         return f"{numbers}_{group_name}"
     return name
 

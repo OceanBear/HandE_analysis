@@ -26,9 +26,12 @@ MODE="batch"
 # (resolved relative to SCRIPT_DIR after it is set below)
 TYPE_INFO_JSON=""
 
+# Skip JSON files whose .h5ad already exists (1 = skip, 0 = overwrite)
+SKIP_EXISTING=1
+
 # --- batch: all *.json in JSON_DIR → OUTPUT_DIR (leave OUTPUT_DIR empty to write next to each JSON) ---
-JSON_DIR="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/json"
-OUTPUT_DIR="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/h5ad"
+JSON_DIR="${JSON_DIR:-/mnt/j/HandE/results/Final/pred/json}"
+OUTPUT_DIR="${OUTPUT_DIR:-/mnt/j/HandE/results/Final/pred/h5ad}"
 
 # --- single: one JSON file ---
 JSON_PATH=""
@@ -56,6 +59,13 @@ type_info_args() {
   fi
 }
 
+skip_args() {
+  # Default: skip existing .h5ad; set SKIP_EXISTING=0 to pass --overwrite
+  if [[ "${SKIP_EXISTING}" == "0" ]]; then
+    echo --overwrite
+  fi
+}
+
 usage() {
   echo "Usage:"
   echo "  Edit CONFIG at the top of this script, then:"
@@ -79,9 +89,9 @@ run_from_config() {
         exit 1
       fi
       if [[ -n "${OUTPUT_DIR}" ]]; then
-        exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR" --output-dir "$OUTPUT_DIR" $(type_info_args)
+        exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR" --output-dir "$OUTPUT_DIR" $(type_info_args) $(skip_args)
       else
-        exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR" $(type_info_args)
+        exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR" $(type_info_args) $(skip_args)
       fi
       ;;
     single)
@@ -90,9 +100,9 @@ run_from_config() {
         exit 1
       fi
       if [[ -n "${OUTPUT_H5AD}" ]]; then
-        exec "$PY" "$PREP" --mode single --json "$JSON_PATH" --output "$OUTPUT_H5AD" $(type_info_args)
+        exec "$PY" "$PREP" --mode single --json "$JSON_PATH" --output "$OUTPUT_H5AD" $(type_info_args) $(skip_args)
       else
-        exec "$PY" "$PREP" --mode single --json "$JSON_PATH" $(type_info_args)
+        exec "$PY" "$PREP" --mode single --json "$JSON_PATH" $(type_info_args) $(skip_args)
       fi
       ;;
     combine)
@@ -104,7 +114,7 @@ run_from_config() {
         echo "CONFIG: MODE=combine requires JSON_LIST array with at least one path." >&2
         exit 1
       fi
-      exec "$PY" "$PREP" --mode combine --combined-output "$COMBINED_H5AD" --json-list "${JSON_LIST[@]}" $(type_info_args)
+      exec "$PY" "$PREP" --mode combine --combined-output "$COMBINED_H5AD" --json-list "${JSON_LIST[@]}" $(type_info_args) $(skip_args)
       ;;
     *)
       echo "CONFIG: MODE must be batch, single, or combine (got: ${MODE})" >&2
@@ -133,9 +143,9 @@ case "$MODE_CLI" in
       usage 1
     fi
     if [[ -n "$OUT_DIR" ]]; then
-      exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR" --output-dir "$OUT_DIR" $(type_info_args)
+      exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR" --output-dir "$OUT_DIR" $(type_info_args) $(skip_args)
     else
-      exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR" $(type_info_args)
+      exec "$PY" "$PREP" --mode batch --json-dir "$JSON_DIR" $(type_info_args) $(skip_args)
     fi
     ;;
   single)
@@ -143,16 +153,16 @@ case "$MODE_CLI" in
     OUT_H5AD="${2:-}"
     [[ -n "$JSON_PATH" ]] || { echo "single: require JSON_PATH" >&2; usage 1; }
     if [[ -n "$OUT_H5AD" ]]; then
-      exec "$PY" "$PREP" --mode single --json "$JSON_PATH" --output "$OUT_H5AD" $(type_info_args)
+      exec "$PY" "$PREP" --mode single --json "$JSON_PATH" --output "$OUT_H5AD" $(type_info_args) $(skip_args)
     else
-      exec "$PY" "$PREP" --mode single --json "$JSON_PATH" $(type_info_args)
+      exec "$PY" "$PREP" --mode single --json "$JSON_PATH" $(type_info_args) $(skip_args)
     fi
     ;;
   combine)
     COMBINED="${1:-}"
     shift || true
     [[ -n "$COMBINED" && $# -ge 1 ]] || { echo "combine: require OUTPUT_H5AD and at least one JSON" >&2; usage 1; }
-    exec "$PY" "$PREP" --mode combine --combined-output "$COMBINED" --json-list "$@" $(type_info_args)
+    exec "$PY" "$PREP" --mode combine --combined-output "$COMBINED" --json-list "$@" $(type_info_args) $(skip_args)
     ;;
   *)
     echo "Unknown command: $MODE_CLI" >&2

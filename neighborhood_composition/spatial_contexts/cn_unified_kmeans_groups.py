@@ -85,6 +85,39 @@ def _prepare_composition_df_for_heatmap(df: pd.DataFrame) -> pd.DataFrame:
     return _rename_cell_type_columns_for_plot(_reorder_cell_type_columns_canonical(df))
 
 
+def _resolve_n_clusters_from_adata(
+    adata: ad.AnnData,
+    cn_key: str,
+    n_clusters: Optional[int] = None,
+) -> int:
+    """Return the number of CNs present in data (authoritative for plot titles).
+
+    If an explicit n_clusters is passed and disagrees with the data, warn and
+    use the data count so titles match the figure.
+    """
+    n_from_data = int(adata.obs[cn_key].nunique())
+    if n_clusters is not None and int(n_clusters) != n_from_data:
+        print(
+            f"  Warning: n_clusters={n_clusters} was requested, but data has "
+            f"{n_from_data} unique CN labels in '{cn_key}'; "
+            f"using {n_from_data} for titles."
+        )
+    return n_from_data
+
+
+def _infer_n_clusters_from_path(path: Path) -> Optional[int]:
+    """Infer n_clusters from path segments like all_n_cluster=4 or results_n=4."""
+    import re
+    for part in [path.name, path.parent.name, *path.parts[::-1]]:
+        match = re.search(r'n_clusters?[=_]?(\d+)', part)
+        if match:
+            return int(match.group(1))
+        match = re.search(r'(?:^|[_-])n[=_](\d+)', part)
+        if match:
+            return int(match.group(1))
+    return None
+
+
 def _is_integer_cn_labels(labels) -> bool:
     """Check if CN labels are integers (1, 2, 3) vs strings (CN1, CN3-1)."""
     for x in labels:
@@ -1245,7 +1278,7 @@ class GroupCNAnalyzer:
     def generate_unified_analysis(
         self,
         k: int = 20,
-        n_clusters: int = 5,
+        n_clusters: Optional[int] = None,
         cn_key: str = 'cn_celltype',
         celltype_key: str = 'cell_type',
         color_palette: str = 'tab20'
@@ -1257,8 +1290,9 @@ class GroupCNAnalyzer:
         -----------
         k : int
             Number of nearest neighbors used (for title)
-        n_clusters : int
-            Number of clusters used (for title)
+        n_clusters : int, optional
+            Number of clusters used (for title). If None, inferred from unique
+            CN labels in the loaded data.
         cn_key : str
             Key in adata.obs containing CN labels
         celltype_key : str
@@ -1272,6 +1306,7 @@ class GroupCNAnalyzer:
         
         # Load all processed tiles
         combined_adata = self.load_all_processed_tiles(cn_key, celltype_key)
+        n_clusters = _resolve_n_clusters_from_adata(combined_adata, cn_key, n_clusters)
         
         # Compute composition (order preserved from original h5ad files)
         composition, composition_zscore = self.compute_unified_cn_composition(
@@ -1367,7 +1402,7 @@ class GroupCNAnalyzer:
     def generate_individual_tiles(
         self,
         k: int = 20,
-        n_clusters: int = 5,
+        n_clusters: Optional[int] = None,
         cn_key: str = 'cn_celltype',
         coord_key: str = 'spatial',
         palette: str = 'tab20'
@@ -1379,8 +1414,9 @@ class GroupCNAnalyzer:
         -----------
         k : int
             Number of nearest neighbors used (for title)
-        n_clusters : int
-            Number of clusters used (for title)
+        n_clusters : int, optional
+            Number of clusters used (for title). If None, inferred from unique
+            CN labels in the loaded data.
         cn_key : str
             Key in adata.obs containing CN labels
         coord_key : str
@@ -1394,6 +1430,7 @@ class GroupCNAnalyzer:
         
         # Load all processed tiles
         combined_adata = self.load_all_processed_tiles(cn_key)
+        n_clusters = _resolve_n_clusters_from_adata(combined_adata, cn_key, n_clusters)
         
         # Visualize individual tile maps
         self.visualize_individual_tile_cns(
@@ -1476,7 +1513,7 @@ class GroupCNAnalyzer:
         celltype_key: str = 'cell_type',
         color_palette: str = 'tab20',
         k: int = 20,
-        n_clusters: int = 5,
+        n_clusters: Optional[int] = None,
         generate_unified: bool = True,
         generate_individual: bool = True
     ):
@@ -1493,8 +1530,8 @@ class GroupCNAnalyzer:
             Color palette name
         k : int
             Number of nearest neighbors (for titles)
-        n_clusters : int
-            Number of clusters (for titles)
+        n_clusters : int, optional
+            Number of clusters (for titles). If None, inferred from data.
         generate_unified : bool
             Whether to generate unified analysis visualizations
         generate_individual : bool
@@ -1571,7 +1608,7 @@ def main():
     )
     parser.add_argument(
         '--processed_h5ad_dir',
-        default="/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/cn_unified_results_n=5/processed_h5ad",
+        default="/home/qxiong/projects/HandE_analysis/neighborhood_composition/spatial_contexts/cn_unified_results/all_n_cluster=4_sub/processed_h5ad",
         help='Directory containing processed h5ad files with CN annotations'
     )
     parser.add_argument(
@@ -1581,7 +1618,7 @@ def main():
     )
     parser.add_argument(
         '--output_dir',
-        default='/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/cn_unified_results_n=5/groups',
+        default='/home/qxiong/projects/HandE_analysis/neighborhood_composition/spatial_contexts/neighborhood_composition/spatial_contexts/cn_unified_results/groups_n_cluster=4_sub',
         help='Output directory for group-specific results (relative to script directory)'
     )
     parser.add_argument(
@@ -1613,8 +1650,8 @@ def main():
     parser.add_argument(
         '--n_clusters',
         type=int,
-        default=5,
-        help='Number of clusters used (for titles, will try to infer from directory name if not provided)'
+        default=None,
+        help='Number of clusters used (for titles). If omitted, inferred from path or from unique CN labels in the data.'
     )
     parser.add_argument(
         '--no-generate_unified',
@@ -1640,14 +1677,12 @@ def main():
         print(f"Note: Detected sub-clustered data (_sub in path), using cn_key='cn_celltype_sub'")
     
     # Try to infer n_clusters from directory name if not provided
+    # (final fallback: unique CN labels when data is loaded)
     if args.n_clusters is None:
-        import re
-        dir_name = Path(args.processed_h5ad_dir).parent.name
-        match = re.search(r'n_cluster[=_]?(\d+)', dir_name)
-        if match:
-            args.n_clusters = int(match.group(1))
-        else:
-            args.n_clusters = 5  # Default
+        inferred = _infer_n_clusters_from_path(Path(args.processed_h5ad_dir))
+        if inferred is not None:
+            args.n_clusters = inferred
+            print(f"Note: Inferred n_clusters={args.n_clusters} from processed_h5ad_dir path")
     
     # Initialize analyzer
     analyzer = GroupCNAnalyzer(

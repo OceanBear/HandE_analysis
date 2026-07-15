@@ -9,9 +9,6 @@ Features:
 - Individual analysis results for each tile
 - Summary statistics across all tiles
 - Consolidated results and visualizations
-
-Author: Generated with Claude Code
-Date: 2025-10-22
 """
 
 import numpy as np
@@ -535,7 +532,7 @@ def run_multiple_tiles_pipeline(
 # Example usage
 if __name__ == "__main__":
     # Configuration
-    tiles_directory = '/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/h5ad'
+    tiles_directory = '/mnt/j/HandE/results/Final/pred/h5ad'
     output_dir = 'cti_multiple_tiles'
 
     # Run pipeline on multiple tiles

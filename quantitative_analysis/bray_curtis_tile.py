@@ -20,7 +20,7 @@ from cell_type_utils import DEFAULT_TYPE_INFO_PATH, load_tile_proportions, resol
 # --------------------------------------------------
 # Defaults (overridden by CLI / bash)
 # --------------------------------------------------
-JSON_DIR = r"/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/json_reclass"
+JSON_DIR = r"/mnt/j/HandE/results/Final/pred/json_selected"
 
 CELL_TYPE_DICT: dict[int, str] = {}
 CELL_TYPE_IDS: list[int] = []
@@ -46,7 +46,7 @@ OUTPUT_DIR_DEFAULT = os.path.join(PROJECT_ROOT, "quantitative_analysis", "bray_c
 # Annotate each heatmap cell with BC value (rarely needed)
 SHOW_BC_VALUES = False
 
-GROUP_ORDER = ["bg", "margin", "tumour_inv", "tumour_lep", "tumour_scar"]
+GROUP_ORDER = ["bg", "margin", "tumour_inv", "tumour_lep"]
 
 
 def load_tile_categories(path):
@@ -67,13 +67,19 @@ def load_tile_categories(path):
 
 
 def simplify_tile_name(fname, group_name):
+    """
+    Simplify tile filename for display.
+    Category group (from tile_categories JSON) is used in the label; the filename
+    token may still be tumour_scar for a tile listed under tumour_lep.
+    """
     name = fname.replace(".json", "")
-    pattern = f"(.+?)_{group_name}_tile_(\\d+_\\d+)"
-    match = re.match(pattern, name)
-
+    match = re.match(
+        r"(.+?)_(tumour_inv|tumour_lep|bg|margin|tumour_scar)_tile_(\d+_\d+)",
+        name,
+    )
     if match:
         prefix = match.group(1)
-        numbers = match.group(2)
+        numbers = match.group(3)
         return f"{numbers}_{prefix}_{group_name}"
     return name
 

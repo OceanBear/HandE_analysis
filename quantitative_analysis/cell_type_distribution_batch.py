@@ -31,7 +31,7 @@ from cell_type_utils import DEFAULT_TYPE_INFO_PATH
 
 # --- Configuration ---
 # ⚠️ Update this path to your directory containing JSON files
-INPUT_DIR = "/mnt/j/HandE/results/SOW1885_n=201_AT2 40X/JN_TS_001-013/pred_03_26/json_reclass"
+INPUT_DIR = "/mnt/j/HandE/results/Final/pred/json_selected"
 
 # Output directory
 OUTPUT_DIR = Path("quantitative_analysis/ctd_batch")

@@ -154,7 +154,13 @@ def load_json_to_anndata(json_path, tile_name=None, image_height=None, type_info
     return adata
 
 
-def batch_process_json_files(json_dir=None, json_paths=None, output_dir=None, type_info_path=None):
+def batch_process_json_files(
+    json_dir=None,
+    json_paths=None,
+    output_dir=None,
+    type_info_path=None,
+    skip_existing=True,
+):
     """
     Batch process multiple JSON files and save each as a separate h5ad file.
 
@@ -171,12 +177,15 @@ def batch_process_json_files(json_dir=None, json_paths=None, output_dir=None, ty
         If None, saves in the same directory as each JSON file
     type_info_path : str or Path, optional
         Path to type_info JSON (default: project root type_info_4class.json)
+    skip_existing : bool, default=True
+        If True, skip JSON files whose output .h5ad already exists.
 
     Returns:
     --------
     results : dict
         Dictionary with processing results:
         - 'success': list of successfully processed files
+        - 'skipped': list of files skipped because .h5ad already exists
         - 'failed': list of (file, error_message) tuples for failed files
     """
 
@@ -193,7 +202,7 @@ def batch_process_json_files(json_dir=None, json_paths=None, output_dir=None, ty
 
     if len(json_paths) == 0:
         print("No JSON files found to process")
-        return {'success': [], 'failed': []}
+        return {'success': [], 'skipped': [], 'failed': []}
 
     # Setup output directory
     if output_dir is not None:
@@ -202,23 +211,32 @@ def batch_process_json_files(json_dir=None, json_paths=None, output_dir=None, ty
         print(f"Output directory: {output_dir}")
 
     # Track results
-    results = {'success': [], 'failed': []}
+    results = {'success': [], 'skipped': [], 'failed': []}
 
     print(f"\n{'='*60}")
     print(f"BATCH PROCESSING: {len(json_paths)} JSON FILES")
+    if skip_existing:
+        print("Skip existing: ON (pass --overwrite to reprocess)")
+    else:
+        print("Skip existing: OFF (will overwrite existing .h5ad)")
     print(f"{'='*60}\n")
 
     # Process each JSON file
     for json_path in tqdm(json_paths, desc="Processing JSON files", unit="file"):
         try:
-            # Load and convert JSON to AnnData
-            adata = load_json_to_anndata(json_path, type_info_path=type_info_path)
-
             # Determine output path
             if output_dir is not None:
                 output_path = output_dir / f"{json_path.stem}.h5ad"
             else:
                 output_path = json_path.parent / f"{json_path.stem}.h5ad"
+
+            if skip_existing and output_path.exists():
+                results['skipped'].append(str(json_path))
+                print(f"  ↷ Skipped (exists): {output_path.name}")
+                continue
+
+            # Load and convert JSON to AnnData
+            adata = load_json_to_anndata(json_path, type_info_path=type_info_path)
 
             # Save h5ad file
             adata.write(output_path)
@@ -235,7 +253,8 @@ def batch_process_json_files(json_dir=None, json_paths=None, output_dir=None, ty
     print(f"\n{'='*60}")
     print(f"BATCH PROCESSING COMPLETE")
     print(f"{'='*60}")
-    print(f"Successfully processed: {len(results['success'])}/{len(json_paths)} files")
+    print(f"Newly processed: {len(results['success'])}/{len(json_paths)} files")
+    print(f"Skipped (already exists): {len(results['skipped'])}/{len(json_paths)} files")
     if results['failed']:
         print(f"Failed: {len(results['failed'])} files")
         print("\nFailed files:")
@@ -342,22 +361,32 @@ def _parse_main():
         default=str(DEFAULT_TYPE_INFO_PATH),
         help="Path to type_info JSON (default: project root type_info_4class.json).",
     )
+    p.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing .h5ad files (default: skip if output already exists).",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = _parse_main()
     type_info_path = args.type_info
+    skip_existing = not args.overwrite
 
     if args.mode == "single":
         if not args.json:
             raise SystemExit("mode=single requires --json PATH")
         json_path = args.json
-        adata = load_json_to_anndata(json_path, type_info_path=type_info_path)
         out = Path(args.output) if args.output else Path(json_path).with_suffix(".h5ad")
-        out.parent.mkdir(parents=True, exist_ok=True)
-        adata.write(out)
-        print(f"\nAnnData object saved to '{out}'")
+        if skip_existing and out.exists():
+            print(f"↷ Skipped (exists): {out}")
+            print("Pass --overwrite to reprocess.")
+        else:
+            adata = load_json_to_anndata(json_path, type_info_path=type_info_path)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            adata.write(out)
+            print(f"\nAnnData object saved to '{out}'")
 
     elif args.mode == "batch":
         if args.json_list:
@@ -365,12 +394,14 @@ if __name__ == "__main__":
                 json_paths=args.json_list,
                 output_dir=args.output_dir,
                 type_info_path=type_info_path,
+                skip_existing=skip_existing,
             )
         elif args.json_dir:
             batch_process_json_files(
                 json_dir=args.json_dir,
                 output_dir=args.output_dir,
                 type_info_path=type_info_path,
+                skip_existing=skip_existing,
             )
         else:
             raise SystemExit("mode=batch requires --json-dir DIR or --json-list FILE1.json FILE2.json ...")
@@ -378,11 +409,15 @@ if __name__ == "__main__":
     elif args.mode == "combine":
         if not args.json_list:
             raise SystemExit("mode=combine requires --json-list FILE1.json FILE2.json ...")
-        adata_combined = combine_multiple_tiles(args.json_list, type_info_path=type_info_path)
         out = Path(args.combined_output)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        adata_combined.write(out)
-        print(f"\nCombined AnnData object saved to '{out}'")
+        if skip_existing and out.exists():
+            print(f"↷ Skipped (exists): {out}")
+            print("Pass --overwrite to reprocess.")
+        else:
+            adata_combined = combine_multiple_tiles(args.json_list, type_info_path=type_info_path)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            adata_combined.write(out)
+            print(f"\nCombined AnnData object saved to '{out}'")
 
     else:
         raise ValueError(f"Invalid mode: {args.mode!r}")
