@@ -19,7 +19,7 @@ Our development and testing were done on a Windows 11 PC with Windows Subsystem 
 
 ## Setup
 
-Requires [Conda](https://docs.conda.io/) (or Miniconda/Mamba) and Python ≥ 3.10. Create an environment and install dependencies from `[requirements.txt](requirements.txt)`:
+Requires [Conda](https://docs.conda.io/) (or Miniconda/Mamba) and Python ≥ 3.10. Create an environment and install dependencies from [requirements.txt](requirements.txt):
 
 ```bash
 conda create -n hande_analysis python=3.13 -y
