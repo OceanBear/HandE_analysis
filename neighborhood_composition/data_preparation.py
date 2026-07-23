@@ -18,7 +18,7 @@ os.chdir(Path(__file__).parent)
 
 def load_json_to_anndata(json_path, tile_name=None, image_height=None, type_info_path=None):
     """
-    Convert NucSegAI JSON output to AnnData object for Squidpy analysis.
+    Convert HoVer-Net JSON output to AnnData object for Squidpy analysis.
 
     Parameters:
     -----------
@@ -315,7 +315,7 @@ def _parse_main():
     import argparse
 
     p = argparse.ArgumentParser(
-        description="Convert NucSegAI JSON to AnnData (.h5ad): single file, batch directory, or combine tiles."
+        description="Convert HoVer-Net JSON to AnnData (.h5ad): single file, batch directory, or combine tiles."
     )
     p.add_argument(
         "--mode",

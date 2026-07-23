@@ -1,15 +1,15 @@
 # Quantitative Analysis
 
-Scripts for summarizing NucSegAI cell-type predictions across tiles and measuring compositional similarity with Bray–Curtis dissimilarity.
+Scripts for summarizing HoVer-Net cell-type predictions across tiles and measuring compositional similarity with Bray–Curtis dissimilarity.
 
-Inputs are per-tile NucSegAI JSON files. Cell-type names and colors come from project-root `type_info_4class.json` (Others, Tumor, Lymphocyte, Fibroblast/Stroma) via `cell_type_utils.py`.
+Inputs are per-tile HoVer-Net JSON files. Cell-type names and colors come from project-root `type_info_4class.json` (Others, Tumor, Lymphocyte, Fibroblast/Stroma) via `cell_type_utils.py`.
 
 ---
 
 ## Suggested pipeline
 
 ```text
-NucSegAI JSON tiles
+HoVer-Net JSON tiles
   ├─► cell_type_distribution_batch.py   # cohort cell-type counts / confidence
   │     (or cell_type_distribution_single.py for one tile)
   │

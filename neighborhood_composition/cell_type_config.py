@@ -1,5 +1,5 @@
 """
-Load NucSegAI cell-type names and colors from type_info_4class.json.
+Load HoVer-Net cell-type names and colors from type_info_4class.json.
 
 JSON format (project root):
     {

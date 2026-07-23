@@ -1,6 +1,6 @@
 # Cell Type Interaction (CTI)
 
-Spatial cell-type interaction analysis for NucSegAI / HandE tile AnnData (`.h5ad`) files.
+Spatial cell-type interaction analysis for HoVer-Net / HandE tile AnnData (`.h5ad`) files.
 
 Typical workflow (after `data_preparation.py` has produced `.h5ad` tiles):
 

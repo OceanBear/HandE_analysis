@@ -1,7 +1,7 @@
 """
-NucSegAI Result Analysis - Cell Type Quantification (Single Tile)
+HoVer-Net Result Analysis - Cell Type Quantification (Single Tile)
 
-This script analyzes a single NucSegAI JSON output file to extract:
+This script analyzes a single HoVer-Net JSON output file to extract:
 - Cell counts by type
 - Cell type proportions
 - Cell density by type (cells/tile and cells/mm²)
@@ -67,7 +67,7 @@ plt.rcParams['figure.figsize'] = (12, 6)
 
 def analyze_single_json(json_path, tile_area_mm2=TILE_AREA_MM2):
     """
-    Analyze a single NucSegAI JSON output file.
+    Analyze a single HoVer-Net JSON output file.
 
     Args:
         json_path (str or Path): Path to JSON file
@@ -640,7 +640,7 @@ def export_density_summary_to_csv(results, output_path, is_filtered=False):
 
 def _parse_args():
     parser = argparse.ArgumentParser(
-        description="Analyze cell-type distribution for one NucSegAI JSON tile."
+        description="Analyze cell-type distribution for one HoVer-Net JSON tile."
     )
     parser.add_argument("--json", type=str, default=INPUT_FILE, help="Path to input JSON file.")
     parser.add_argument("--output-dir", type=str, default=str(OUTPUT_DIR), help="Output directory.")

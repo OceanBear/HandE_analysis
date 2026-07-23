@@ -1,5 +1,5 @@
 """
-NucSegAI Result Analysis - Cell Type Quantification (Batch)
+HoVer-Net Result Analysis - Cell Type Quantification (Batch)
 
 This script processes all JSON files in a directory, aggregates results,
 and produces the same output as the notebook's batch analysis.
@@ -256,7 +256,7 @@ def aggregate_confidence_by_type(json_files, threshold=None):
 
 def _parse_args():
     parser = argparse.ArgumentParser(
-        description="Batch cell-type distribution analysis for NucSegAI JSON tiles."
+        description="Batch cell-type distribution analysis for HoVer-Net JSON tiles."
     )
     parser.add_argument("--input-dir", type=str, default=INPUT_DIR, help="Directory of JSON files.")
     parser.add_argument("--output-dir", type=str, default=str(OUTPUT_DIR), help="Output directory.")

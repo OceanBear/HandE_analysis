@@ -1,6 +1,6 @@
 # HandE Analysis
 
-Spatial and compositional analysis of **NucSegAI** cell-type predictions on H&E tissue tiles.
+Spatial and compositional analysis of **HoVer-Net** cell-type predictions on H&E tissue tiles.
 
 Given per-tile prediction JSONs (4 classes: Others, Tumor, Lymphocyte, Fibroblast/Stroma), this repo can:
 
@@ -45,27 +45,29 @@ Preparation script (JSON → `.h5ad`): `neighborhood_composition/data_preparatio
 
 ---
 
+
+
 ## Example outputs
 
 **Cell-type distribution (counts + proportions)**
 
-![Cell type distribution](quantitative_analysis/example_pic/cell_type_distribution_unfiltered.png)
+Cell type distribution
 
 **Overall Bray–Curtis (all categorized tiles)**
 
-![Overall Bray-Curtis](quantitative_analysis/example_pic/bray_curtis_overall_87_heatmap.png)
+Overall Bray-Curtis
 
 **CN composition heatmap**
 
-![CN composition heatmap](neighborhood_composition/spatial_contexts/example_pic/unified_cn_composition_heatmap.png)
+CN composition heatmap
 
 **Per-tile CN frequency (all groups)**
 
-![Per-tile CN frequency](neighborhood_composition/spatial_contexts/example_pic/neighborhood_frequency_per_tile_all_groups.png)
+Per-tile CN frequency
 
 **Mean CTI across tiles**
 
-![Mean CTI](neighborhood_composition/cell_type_interaction/example_pic/aggregated_mean_cti.png)
+Mean CTI
 
 ---
 
@@ -74,7 +76,7 @@ Preparation script (JSON → `.h5ad`): `neighborhood_composition/data_preparatio
 ## Suggested workflow
 
 ```text
-NucSegAI JSON tiles
+HoVer-Net JSON tiles
   ├─► quantitative_analysis/     # composition + Bray–Curtis
   │
   └─► data_preparation.py        # JSON → h5ad
