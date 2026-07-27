@@ -1,6 +1,6 @@
 # HandE Analysis
 
-Spatial and compositional analysis of **HoVer-Net** cell-type predictions on H&E tissue tiles.
+Spatial and compositional analysis of **[HoVer-Net](https://github.com/vqdang/hover_net)** cell-type predictions on H&E tissue tiles.
 
 Given per-tile prediction JSONs (4 classes: Others, Tumor, Lymphocyte, Fibroblast/Stroma), this repo can:
 
