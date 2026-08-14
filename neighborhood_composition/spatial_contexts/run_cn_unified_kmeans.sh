@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # ========== CONFIG ==========
-TILES_DIR="/mnt/j/HandE/results/Final/pred/h5ad_selected"
+TILES_DIR="/mnt/f/data/HandE/sow1885_n201/nucsegai_pred_1003/h5ad_filtered"
 OUTPUT_DIR="cn_unified_results"
 K=20
 N_CLUSTERS=4

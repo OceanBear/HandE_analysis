@@ -532,7 +532,7 @@ def run_multiple_tiles_pipeline(
 # Example usage
 if __name__ == "__main__":
     # Configuration
-    tiles_directory = '/mnt/j/HandE/results/Final/pred/h5ad'
+    tiles_directory = '/mnt/f/data/HandE/sow1885_n201/nucsegai_pred_1003/h5ad_filtered'
     output_dir = 'cti_multiple_tiles'
 
     # Run pipeline on multiple tiles

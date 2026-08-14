@@ -30,8 +30,8 @@ TYPE_INFO_JSON=""
 SKIP_EXISTING=1
 
 # --- batch: all *.json in JSON_DIR → OUTPUT_DIR (leave OUTPUT_DIR empty to write next to each JSON) ---
-JSON_DIR="${JSON_DIR:-/mnt/j/HandE/results/Final/pred/json}"
-OUTPUT_DIR="${OUTPUT_DIR:-/mnt/j/HandE/results/Final/pred/h5ad}"
+JSON_DIR="${JSON_DIR:-/mnt/f/data/HandE/sow1885_n201/nucsegai_pred_1003/json_filtered}"
+OUTPUT_DIR="${OUTPUT_DIR:-/mnt/f/data/HandE/sow1885_n201/nucsegai_pred_1003/h5ad_filtered}"
 
 # --- single: one JSON file ---
 JSON_PATH=""
